@@ -1,0 +1,12 @@
+#!/bin/bash
+#Set job requirements
+#SBATCH -t 6:00:00
+#SBATCH -p gpu_shared
+
+#Loading modules
+module load 2020
+
+# activate virtual environment
+. ../venv/bin/activate
+
+echo "done"

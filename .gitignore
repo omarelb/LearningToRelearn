@@ -505,7 +505,7 @@ TSWLatexianTemp*
 *.max
 
 ### vscode ###
-.vscode/*
+*/.vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
@@ -513,3 +513,6 @@ TSWLatexianTemp*
 *.code-workspace
 
 # End of https://www.toptal.com/developers/gitignore/api/images,vscode
+
+data/
+*.pt
