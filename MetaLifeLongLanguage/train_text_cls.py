@@ -52,6 +52,7 @@ if __name__ == '__main__':
 
     # Set base path
     base_path = os.path.dirname(os.path.abspath(__file__))
+    data_path = Path(base_path).parent / "data"
 
     # Set random seed
     torch.manual_seed(args.seed)
@@ -60,13 +61,16 @@ if __name__ == '__main__':
 
     # Load the datasets
     logger.info('Loading the datasets')
-    train_datasets, test_datasets = [], []
+    train_datasets, val_datasets, test_datasets = [], []
     for dataset_id in dataset_order_mapping[args.order]:
-        train_dataset, test_dataset = datasets.utils.get_dataset(base_path, dataset_id)
+        train_dataset, val_dataset, test_dataset = datasets.utils.get_dataset(data_path, dataset_id)
         logger.info('Loaded {}'.format(train_dataset.__class__.__name__))
+        # the same model is used for all tasks, so we need to shift labels of tasks
         train_dataset = datasets.utils.offset_labels(train_dataset)
+        val_dataset = datasets.utils.offset_labels(val_dataset)
         test_dataset = datasets.utils.offset_labels(test_dataset)
         train_datasets.append(train_dataset)
+        val_datasets.append(val_dataset)
         test_datasets.append(test_dataset)
     logger.info('Finished loading all the datasets')
 
@@ -96,7 +100,7 @@ if __name__ == '__main__':
     model_dir = os.path.join(base_path, 'saved_models')
     os.makedirs(model_dir, exist_ok=True)
     logger.info('----------Training starts here----------')
-    learner.training(train_datasets, **vars(args))
+    learner.training(train_datasets, val_datasets, **vars(args))
     learner.save_model(os.path.join(model_dir, model_file_name))
     logger.info('Saved the model with name {}'.format(model_file_name))
 

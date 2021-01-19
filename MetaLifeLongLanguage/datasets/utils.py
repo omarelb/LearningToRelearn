@@ -6,8 +6,8 @@ import torch
 import numpy as np
 from sklearn.cluster import KMeans
 
-from datasets.lifelong_fewrel_dataset import LifelongFewRelDataset
-from datasets.text_classification_dataset import AGNewsDataset, AmazonDataset, YelpDataset, DBPediaDataset, \
+from .lifelong_fewrel_dataset import LifelongFewRelDataset
+from .text_classification_dataset import AGNewsDataset, AmazonDataset, YelpDataset, DBPediaDataset, \
     YahooAnswersDataset
 
 
@@ -28,25 +28,30 @@ def rel_encode(batch):
     return text, label, candidate_relations
 
 
-def get_dataset(base_path, dataset_id):
+def get_dataset(data_path, dataset_id):
     if dataset_id == 0:
-        train_dataset = AGNewsDataset(train_path, 'train', reduce=True)
-        test_dataset = AGNewsDataset(test_path, 'test', reduce=True)
+        train_dataset = AGNewsDataset(data_path, 'train', reduce=True)
+        val_dataset = AGNewsDataset(data_path, 'val', reduce=True)
+        test_dataset = AGNewsDataset(data_path, 'test', reduce=True)
     elif dataset_id == 1:
-        train_dataset = AmazonDataset(train_path, 'train', reduce=True)
-        test_dataset = AmazonDataset(test_path, 'test', reduce=True)
+        train_dataset = AmazonDataset(data_path, 'train', reduce=True)
+        val_dataset = AmazonDataset(data_path, 'val', reduce=True)
+        test_dataset = AmazonDataset(data_path, 'test', reduce=True)
     elif dataset_id == 2:
-        train_dataset = YelpDataset(train_path, 'train', reduce=True)
-        test_dataset = YelpDataset(test_path, 'test', reduce=True)
+        train_dataset = YelpDataset(data_path, 'train', reduce=True)
+        val_dataset = YelpDataset(data_path, 'val', reduce=True)
+        test_dataset = YelpDataset(data_path, 'test', reduce=True)
     elif dataset_id == 3:
-        train_dataset = DBPediaDataset(train_path, 'train', reduce=True)
-        test_dataset = DBPediaDataset(test_path, 'test', reduce=True)
+        train_dataset = DBPediaDataset(data_path, 'train', reduce=True)
+        val_dataset = DBPediaDataset(data_path, 'val', reduce=True)
+        test_dataset = DBPediaDataset(data_path, 'test', reduce=True)
     elif dataset_id == 4:
-        train_dataset = YahooAnswersDataset(train_path, 'train', reduce=True)
-        test_dataset = YahooAnswersDataset(test_path, 'test', reduce=True)
+        train_dataset = YahooAnswersDataset(data_path, 'train', reduce=True)
+        val_dataset = YahooAnswersDataset(data_path, 'val', reduce=True)
+        test_dataset = YahooAnswersDataset(data_path, 'test', reduce=True)
     else:
         raise Exception('Invalid dataset ID')
-    return train_dataset, test_dataset
+    return train_dataset, val_dataset, test_dataset
 
 
 def offset_labels(dataset):
