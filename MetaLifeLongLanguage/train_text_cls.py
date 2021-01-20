@@ -5,10 +5,14 @@ from argparse import ArgumentParser
 from datetime import datetime
 
 import numpy as np
-
 import torch
 
-import datasets.utils
+# command line management
+from dataclasses import dataclass, field
+import hydra
+from omegaconf import DictConfig, OmegaConf
+
+import MetaLifeLongLanguage.datasets.utils
 from models.cls_agem import AGEM
 from models.cls_anml import ANML
 from models.cls_baseline import Baseline
@@ -19,9 +23,8 @@ from models.cls_replay import Replay
 logging.basicConfig(level='INFO', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('ContinualLearningLog')
 
-
-if __name__ == '__main__':
-
+@hydra.main(config_path="configs/defaults.yaml")
+def main(config_path="configs/defaults.yaml"):
     # Define the ordering of the datasets
     dataset_order_mapping = {
         1: [2, 0, 3, 1, 4],
@@ -33,21 +36,21 @@ if __name__ == '__main__':
 
     # Parse command line arguments
     parser = ArgumentParser()
-    parser.add_argument('--order', type=int, help='Order of datasets', required=True)
-    parser.add_argument('--n_epochs', type=int, help='Number of epochs (only for MTL)', default=1)
-    parser.add_argument('--lr', type=float, help='Learning rate (only for the baselines)', default=3e-5)
-    parser.add_argument('--inner_lr', type=float, help='Inner-loop learning rate', default=0.001)
-    parser.add_argument('--meta_lr', type=float, help='Meta learning rate', default=3e-5)
-    parser.add_argument('--model', type=str, help='Name of the model', default='bert')
-    parser.add_argument('--learner', type=str, help='Learner method', default='oml')
-    parser.add_argument('--mini_batch_size', type=int, help='Batch size of data points within an episode', default=16)
-    parser.add_argument('--updates', type=int, help='Number of inner-loop updates', default=5)
-    parser.add_argument('--write_prob', type=float, help='Write probability for buffer memory', default=1.0)
-    parser.add_argument('--max_length', type=int, help='Maximum sequence length for the input', default=448)
-    parser.add_argument('--seed', type=int, help='Random seed', default=42)
-    parser.add_argument('--replay_rate', type=float, help='Replay rate from memory', default=0.01)
-    parser.add_argument('--replay_every', type=int, help='Number of data points between replay', default=9600)
-    args = parser.parse_args()
+    # parser.add_argument('--order', type=int, help='Order of datasets', required=True)
+    # parser.add_argument('--n_epochs', type=int, help='Number of epochs (only for MTL)', default=1)
+    # parser.add_argument('--lr', type=float, help='Learning rate (only for the baselines)', default=3e-5)
+    # parser.add_argument('--inner_lr', type=float, help='Inner-loop learning rate', default=0.001)
+    # parser.add_argument('--meta_lr', type=float, help='Meta learning rate', default=3e-5)
+    # parser.add_argument('--model', type=str, help='Name of the model', default='bert')
+    # parser.add_argument('--learner', type=str, help='Learner method', default='oml')
+    # parser.add_argument('--mini_batch_size', type=int, help='Batch size of data points within an episode', default=16)
+    # parser.add_argument('--updates', type=int, help='Number of inner-loop updates', default=5)
+    # parser.add_argument('--write_prob', type=float, help='Write probability for buffer memory', default=1.0)
+    # parser.add_argument('--max_length', type=int, help='Maximum sequence length for the input', default=448)
+    # parser.add_argument('--seed', type=int, help='Random seed', default=42)
+    # parser.add_argument('--replay_rate', type=float, help='Replay rate from memory', default=0.01)
+    # parser.add_argument('--replay_every', type=int, help='Number of data points between replay', default=9600)
+    # args = parser.parse_args()
     logger.info('Using configuration: {}'.format(vars(args)))
 
     # Set base path
@@ -107,3 +110,6 @@ if __name__ == '__main__':
     # Testing
     logger.info('----------Testing starts here----------')
     learner.testing(test_datasets, **vars(args))
+
+if __name__ == '__main__':
+    main()

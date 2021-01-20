@@ -220,3 +220,29 @@ class YahooAnswersDataset(ClassificationDataset):
         data['labels'] = data['labels'] - 1
         data.drop(columns=['question_title', 'question_content', 'best_answer'], inplace=True)
         return data
+
+
+def get_dataset(data_path, dataset_id):
+    if dataset_id == 0:
+        train_dataset = AGNewsDataset(data_path, 'train', reduce=True)
+        val_dataset = AGNewsDataset(data_path, 'val', reduce=True)
+        test_dataset = AGNewsDataset(data_path, 'test', reduce=True)
+    elif dataset_id == 1:
+        train_dataset = AmazonDataset(data_path, 'train', reduce=True)
+        val_dataset = AmazonDataset(data_path, 'val', reduce=True)
+        test_dataset = AmazonDataset(data_path, 'test', reduce=True)
+    elif dataset_id == 2:
+        train_dataset = YelpDataset(data_path, 'train', reduce=True)
+        val_dataset = YelpDataset(data_path, 'val', reduce=True)
+        test_dataset = YelpDataset(data_path, 'test', reduce=True)
+    elif dataset_id == 3:
+        train_dataset = DBPediaDataset(data_path, 'train', reduce=True)
+        val_dataset = DBPediaDataset(data_path, 'val', reduce=True)
+        test_dataset = DBPediaDataset(data_path, 'test', reduce=True)
+    elif dataset_id == 4:
+        train_dataset = YahooAnswersDataset(data_path, 'train', reduce=True)
+        val_dataset = YahooAnswersDataset(data_path, 'val', reduce=True)
+        test_dataset = YahooAnswersDataset(data_path, 'test', reduce=True)
+    else:
+        raise Exception('Invalid dataset ID')
+    return train_dataset, val_dataset, test_dataset

@@ -10,9 +10,9 @@ import numpy as np
 from torch.utils import data
 from transformers import AdamW
 
-import datasets
-import models.utils
-from models.base_models import ReplayMemory, TransformerClsModel
+import MetaLifeLongLanguage.datasets
+import MetaLifeLongLanguage.models.utils as model_utils
+from MetaLifeLongLanguage.models.base_models import ReplayMemory, TransformerClsModel
 
 logging.basicConfig(level='INFO', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('MAML-Log')
@@ -71,12 +71,12 @@ class MAML:
                 output = fpn(input_dict)
                 loss = self.loss_fn(output, labels)
                 diffopt.step(loss)
-                pred = models.utils.make_prediction(output.detach())
+                pred = model_utils.make_prediction(output.detach())
                 support_loss.append(loss.item())
                 task_predictions.extend(pred.tolist())
                 task_labels.extend(labels.tolist())
 
-            acc, prec, rec, f1 = models.utils.calculate_metrics(task_predictions, task_labels)
+            acc, prec, rec, f1 = model_utils.calculate_metrics(task_predictions, task_labels)
 
             logger.info('Support set metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, '
                         'recall = {:.4f}, F1 score = {:.4f}'.format(np.mean(support_loss), acc, prec, rec, f1))
@@ -90,12 +90,12 @@ class MAML:
                     output = fpn(input_dict)
                     loss = self.loss_fn(output, labels)
                 loss = loss.item()
-                pred = models.utils.make_prediction(output.detach())
+                pred = model_utils.make_prediction(output.detach())
                 all_losses.append(loss)
                 all_predictions.extend(pred.tolist())
                 all_labels.extend(labels.tolist())
 
-        acc, prec, rec, f1 = models.utils.calculate_metrics(all_predictions, all_labels)
+        acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
         logger.info('Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, '
                     'F1 score = {:.4f}'.format(np.mean(all_losses), acc, prec, rec, f1))
 
@@ -146,13 +146,13 @@ class MAML:
                     output = fpn(input_dict)
                     loss = self.loss_fn(output, labels)
                     diffopt.step(loss)
-                    pred = models.utils.make_prediction(output.detach())
+                    pred = model_utils.make_prediction(output.detach())
                     support_loss.append(loss.item())
                     task_predictions.extend(pred.tolist())
                     task_labels.extend(labels.tolist())
                     self.memory.write_batch(text, labels)
 
-                acc, prec, rec, f1 = models.utils.calculate_metrics(task_predictions, task_labels)
+                acc, prec, rec, f1 = model_utils.calculate_metrics(task_predictions, task_labels)
 
                 logger.info('Episode {} support set: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, '
                             'recall = {:.4f}, F1 score = {:.4f}'.format(episode_id + 1,
@@ -181,9 +181,9 @@ class MAML:
                     output = fpn(input_dict)
                     loss = self.loss_fn(output, labels)
                     query_loss.append(loss.item())
-                    pred = models.utils.make_prediction(output.detach())
+                    pred = model_utils.make_prediction(output.detach())
 
-                    acc, prec, rec, f1 = models.utils.calculate_metrics(pred.tolist(), labels.tolist())
+                    acc, prec, rec, f1 = model_utils.calculate_metrics(pred.tolist(), labels.tolist())
                     query_acc.append(acc)
                     query_prec.append(prec)
                     query_rec.append(rec)

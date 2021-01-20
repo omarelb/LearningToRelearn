@@ -1,0 +1,11 @@
+model:
+  class: autopunctuation.models.bi_gru.BiGRU 
+  params:
+    x_vocab_size: 80000
+    y_vocab_size: 4
+    emb_dim: 320
+    h_dim: 256
+    enc_layers: 1
+    enc_dropout: 0.
+    dec_layers: 1
+    dec_dropout: 0.3

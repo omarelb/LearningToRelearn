@@ -1,0 +1,18 @@
+defaults:
+  - training: on_gpu
+  - model: bert
+  - data: classification
+  - learner: oml
+
+seed: 42 # random seed
+inference: false
+version: 0
+write_prob: 1.0 # Write probability for buffer memory
+replay_rate: 0.01 # replay rate from memory
+replay_every: 9600 # Number of data points between replay
+
+hydra:
+  run:
+    dir: experiments/${now:%Y-%m-%d_%H-%M-%S}_${hydra.job.override_dirname}
+  sweep:
+    subdir: ${hydra.job.num}_${hydra.job.override_dirname}

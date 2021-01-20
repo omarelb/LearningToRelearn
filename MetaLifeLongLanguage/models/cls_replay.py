@@ -7,9 +7,9 @@ import numpy as np
 from torch.utils import data
 from transformers import AdamW
 
-import datasets
-import models.utils
-from models.base_models import TransformerClsModel, ReplayMemory
+import MetaLifeLongLanguage.datasets
+import MetaLifeLongLanguage.models.utils as model_utils
+from MetaLifeLongLanguage.models.base_models import TransformerClsModel, ReplayMemory
 
 logging.basicConfig(level='INFO', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('Replay-Log')
@@ -82,7 +82,7 @@ class Replay:
                     self.optimizer.step()
 
                 loss = loss.item()
-                pred = models.utils.make_prediction(output.detach())
+                pred = model_utils.make_prediction(output.detach())
                 # TODO: Add writing to tensorboard functionality
                 all_losses.append(loss)
                 all_predictions.extend(pred.tolist())
@@ -91,7 +91,7 @@ class Replay:
                 self.memory.write_batch(text, labels)
 
                 if iter % log_freq == 0:
-                    acc, prec, rec, f1 = models.utils.calculate_metrics(all_predictions, all_labels)
+                    acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
                     logger.info(
                         'Epoch {} metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, '
                         'F1 score = {:.4f}'.format(epoch + 1, np.mean(all_losses), acc, prec, rec, f1))
@@ -109,12 +109,12 @@ class Replay:
                 output = self.model(input_dict)
                 loss = self.loss_fn(output, labels)
             loss = loss.item()
-            pred = models.utils.make_prediction(output.detach())
+            pred = model_utils.make_prediction(output.detach())
             all_losses.append(loss)
             all_predictions.extend(pred.tolist())
             all_labels.extend(labels.tolist())
 
-        acc, prec, rec, f1 = models.utils.calculate_metrics(all_predictions, all_labels)
+        acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
         logger.info('Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, '
                     'F1 score = {:.4f}'.format(np.mean(all_losses), acc, prec, rec, f1))
 

@@ -7,9 +7,9 @@ import numpy as np
 from torch.utils import data
 from transformers import AdamW
 
-import datasets.utils
-import models.utils
-from models.base_models import TransformerClsModel, ReplayMemory
+import MetaLifeLongLanguage.datasets.utils
+import MetaLifeLongLanguage.models.utils as model_utils
+from MetaLifeLongLanguage.models.base_models import TransformerClsModel, ReplayMemory
 
 logging.basicConfig(level='INFO', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('AGEM-Log')
@@ -103,7 +103,7 @@ class AGEM:
                 self.optimizer.step()
 
                 loss = loss.item()
-                pred, true_labels = models.utils.make_rel_prediction(output, ranking_label)
+                pred, true_labels = model_utils.make_rel_prediction(output, ranking_label)
                 all_losses.append(loss)
                 all_predictions.extend(pred.tolist())
                 all_labels.extend(true_labels.tolist())
@@ -111,7 +111,7 @@ class AGEM:
                 self.memory.write_batch(text, label, candidates)
 
                 if iter % log_freq == 0:
-                    acc = models.utils.calculate_accuracy(all_predictions, all_labels)
+                    acc = model_utils.calculate_accuracy(all_predictions, all_labels)
                     logger.info(
                         'Epoch {} metrics: Loss = {:.4f}, accuracy = {:.4f}'.format(epoch + 1, np.mean(all_losses), acc))
                     all_losses, all_predictions, all_labels = [], [], []
@@ -129,11 +129,11 @@ class AGEM:
                 input_dict = self.model.encode_text(list(zip(replicated_text, replicated_relations)))
                 output = self.model(input_dict)
 
-            pred, true_labels = models.utils.make_rel_prediction(output, ranking_label)
+            pred, true_labels = model_utils.make_rel_prediction(output, ranking_label)
             all_predictions.extend(pred.tolist())
             all_labels.extend(true_labels.tolist())
 
-        acc = models.utils.calculate_accuracy(all_predictions, all_labels)
+        acc = model_utils.calculate_accuracy(all_predictions, all_labels)
 
         return acc
 

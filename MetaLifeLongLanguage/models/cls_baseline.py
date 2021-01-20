@@ -7,9 +7,9 @@ import numpy as np
 from torch.utils import data
 from transformers import AdamW
 
-import datasets
-import models.utils
-from models.base_models import TransformerClsModel
+import MetaLifeLongLanguage.datasets
+import MetaLifeLongLanguage.models.utils as model_utils
+from MetaLifeLongLanguage.models.base_models import TransformerClsModel
 
 logging.basicConfig(level='INFO', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('Baseline-Log')
@@ -54,14 +54,14 @@ class Baseline:
                 loss.backward()
                 self.optimizer.step()
                 loss = loss.item()
-                pred = models.utils.make_prediction(output.detach())
+                pred = model_utils.make_prediction(output.detach())
                 all_losses.append(loss)
                 all_predictions.extend(pred.tolist())
                 all_labels.extend(labels.tolist())
                 iter += 1
 
                 if iter % log_freq == 0:
-                    acc, prec, rec, f1 = models.utils.calculate_metrics(all_predictions, all_labels)
+                    acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
                     logger.info(
                         'Epoch {} metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, '
                         'F1 score = {:.4f}'.format(epoch + 1, np.mean(all_losses), acc, prec, rec, f1))
@@ -79,18 +79,19 @@ class Baseline:
                 output = self.model(input_dict)
                 loss = self.loss_fn(output, labels)
             loss = loss.item()
-            pred = models.utils.make_prediction(output.detach())
+            pred = model_utils.make_prediction(output.detach())
             all_losses.append(loss)
             all_predictions.extend(pred.tolist())
             all_labels.extend(labels.tolist())
 
-        acc, prec, rec, f1 = models.utils.calculate_metrics(all_predictions, all_labels)
+        acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
         logger.info('Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, '
                     'F1 score = {:.4f}'.format(np.mean(all_losses), acc, prec, rec, f1))
 
         return acc, prec, rec, f1
 
-    def training(self, train_datasets, **kwargs):
+    def training(self, train_datasets, val_datasets, **kwargs):
+        #TODO: use val_datasets
         n_epochs = kwargs.get('n_epochs', 1)
         log_freq = kwargs.get('log_freq', 500)
         mini_batch_size = kwargs.get('mini_batch_size')

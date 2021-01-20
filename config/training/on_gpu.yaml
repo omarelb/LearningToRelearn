@@ -1,0 +1,9 @@
+# @package _group_
+device: 'cuda'
+inner_lr: 0.001 # Inner-loop learning rate
+meta_lr: 0.00001 # Meta learning rate
+epochs: 1 # number of epochs
+valid_freq: 100
+save_freq: 1000
+train_report_freq: 50
+batch_size: 16

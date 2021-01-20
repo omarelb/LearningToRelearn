@@ -10,9 +10,9 @@ import numpy as np
 from torch.utils import data
 from transformers import AdamW
 
-import datasets.utils
-import models.utils
-from models.base_models import ReplayMemory, TransformerRLN, LinearPLN
+import MetaLifeLongLanguage.datasets.utils
+import MetaLifeLongLanguage.models.utils as model_utils
+from MetaLifeLongLanguage.models.base_models import ReplayMemory, TransformerRLN, LinearPLN
 
 logging.basicConfig(level='INFO', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('OML-Log')
@@ -84,12 +84,12 @@ class OML:
                 loss = self.loss_fn(output, targets)
 
                 diffopt.step(loss)
-                pred, true_labels = models.utils.make_rel_prediction(output, ranking_label)
+                pred, true_labels = model_utils.make_rel_prediction(output, ranking_label)
                 support_loss.append(loss.item())
                 task_predictions.extend(pred.tolist())
                 task_labels.extend(true_labels.tolist())
 
-            acc = models.utils.calculate_accuracy(task_predictions, task_labels)
+            acc = model_utils.calculate_accuracy(task_predictions, task_labels)
 
             logger.info('Support set metrics: Loss = {:.4f}, accuracy = {:.4f}'.format(np.mean(support_loss), acc))
 
@@ -108,12 +108,12 @@ class OML:
                     loss = self.loss_fn(output, targets)
 
                 loss = loss.item()
-                pred, true_labels = models.utils.make_rel_prediction(output, ranking_label)
+                pred, true_labels = model_utils.make_rel_prediction(output, ranking_label)
                 all_losses.append(loss)
                 all_predictions.extend(pred.tolist())
                 all_labels.extend(true_labels.tolist())
 
-        acc = models.utils.calculate_accuracy(all_predictions, all_labels)
+        acc = model_utils.calculate_accuracy(all_predictions, all_labels)
         logger.info('Test metrics: Loss = {:.4f}, accuracy = {:.4f}'.format(np.mean(all_losses), acc))
 
         return acc
@@ -169,13 +169,13 @@ class OML:
                     loss = self.loss_fn(output, targets)
 
                     diffopt.step(loss)
-                    pred, true_labels = models.utils.make_rel_prediction(output, ranking_label)
+                    pred, true_labels = model_utils.make_rel_prediction(output, ranking_label)
                     support_loss.append(loss.item())
                     task_predictions.extend(pred.tolist())
                     task_labels.extend(true_labels.tolist())
                     self.memory.write_batch(text, label, candidates)
 
-                acc = models.utils.calculate_accuracy(task_predictions, task_labels)
+                acc = model_utils.calculate_accuracy(task_predictions, task_labels)
 
                 logger.info('Episode {} support set: Loss = {:.4f}, accuracy = {:.4f}'.format(episode_id + 1,
                                                                                               np.mean(support_loss),
@@ -210,9 +210,9 @@ class OML:
                     loss = self.loss_fn(output, targets)
 
                     query_loss.append(loss.item())
-                    pred, true_labels = models.utils.make_rel_prediction(output, ranking_label)
+                    pred, true_labels = model_utils.make_rel_prediction(output, ranking_label)
 
-                    acc = models.utils.calculate_accuracy(pred.tolist(), true_labels.tolist())
+                    acc = model_utils.calculate_accuracy(pred.tolist(), true_labels.tolist())
                     query_acc.append(acc)
 
                     # RLN meta gradients

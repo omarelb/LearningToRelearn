@@ -9,7 +9,7 @@ import torchtext
 import torch
 import numpy as np
 
-import datasets.utils
+import MetaLifeLongLanguage.datasets.utils
 from datasets.lifelong_fewrel_dataset import LifelongFewRelDataset
 from models.rel_agem import AGEM
 from models.rel_anml import ANML
