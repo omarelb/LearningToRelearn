@@ -10,6 +10,7 @@ version: 0
 write_prob: 1.0 # Write probability for buffer memory
 replay_rate: 0.01 # replay rate from memory
 replay_every: 9600 # Number of data points between replay
+updates: 5 # number of inner loop updates
 
 hydra:
   run:
