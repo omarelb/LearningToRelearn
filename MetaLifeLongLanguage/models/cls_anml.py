@@ -13,12 +13,13 @@ from transformers import AdamW
 import MetaLifeLongLanguage.datasets
 import MetaLifeLongLanguage.models.utils as model_utils
 from MetaLifeLongLanguage.models.base_models import ReplayMemory, TransformerClsModel, TransformerNeuromodulator
+from MetaLifeLongLanguage.learner import Learner
 
 logging.basicConfig(level='INFO', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('ANML-Log')
 
 
-class ANML:
+class ANML(Learner):
 
     def __init__(self, device, n_classes, **kwargs):
         self.inner_lr = kwargs.get('inner_lr')

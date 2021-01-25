@@ -10,12 +10,13 @@ from transformers import AdamW
 import MetaLifeLongLanguage.datasets
 import MetaLifeLongLanguage.models.utils as model_utils
 from MetaLifeLongLanguage.models.base_models import TransformerClsModel, ReplayMemory
+from MetaLifeLongLanguage.learner import Learner
 
 logging.basicConfig(level='INFO', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('Replay-Log')
 
 
-class Replay:
+class Replay(Learner):
 
     def __init__(self, device, n_classes, **kwargs):
         self.lr = kwargs.get('lr', 3e-5)

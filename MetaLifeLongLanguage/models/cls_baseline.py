@@ -10,20 +10,44 @@ from transformers import AdamW
 import MetaLifeLongLanguage.datasets
 import MetaLifeLongLanguage.models.utils as model_utils
 from MetaLifeLongLanguage.models.base_models import TransformerClsModel
+from MetaLifeLongLanguage.learner import Learner
 
 logging.basicConfig(level='INFO', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('Baseline-Log')
 
 
-class Baseline:
+class Baseline(Learner):
+    def __init__(self,
+                 lr,
+                 type,
+                 model_name,
+                 n_classes,
+                 max_length,
+                 device="cuda"):
+        """
+        Baseline models: sequential and multitask setup.
 
-    def __init__(self, device, n_classes, training_mode, **kwargs):
-        self.lr = kwargs.get('lr', 3e-5)
+        Parameters
+        ---
+        lr: float
+            Learning rate.
+        type: str
+            One of {"sequential", "multitask"}
+        model_name: str
+            One of {"bert", "albert"}
+        n_classes: int
+            Number of classes.
+        max_length: int
+            Max length of sentences fed into the model.
+        device: str
+            One of {"cpu", "cuda"}.
+        """
+        self.lr = lr
         self.device = device
-        self.training_mode = training_mode
-        self.model = TransformerClsModel(model_name=kwargs.get('model'),
+        self.type = type
+        self.model = TransformerClsModel(model_name=model.name,
                                          n_classes=n_classes,
-                                         max_length=kwargs.get('max_length'),
+                                         max_length=max_length,
                                          device=device)
         logger.info('Loaded {} as model'.format(self.model.__class__.__name__))
         self.loss_fn = nn.CrossEntropyLoss()

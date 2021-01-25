@@ -6,11 +6,21 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from torch.utils import data
 
+import logging
+
 MAX_TRAIN_SIZE = 115000
 MAX_VAL_SIZE = 5000
 MAX_TEST_SIZE = 7600
 
 SAMPLE_SEED = 42
+
+# Define the ordering of the datasets
+DATASET_ORDER_MAPPING = {
+    1: [2, 0, 3, 1, 4],
+    2: [3, 4, 0, 1, 2],
+    3: [2, 4, 1, 3, 0],
+    4: [0, 2, 1, 4, 3]
+}
 
 def preprocess(text):
     """
@@ -222,27 +232,85 @@ class YahooAnswersDataset(ClassificationDataset):
         return data
 
 
+DATASET_MAPPING = [
+    AGNewsDataset,
+    AmazonDataset,
+    YelpDataset,
+    DBPediaDataset,
+    YahooAnswersDataset
+]
+
+
 def get_dataset(data_path, dataset_id):
-    if dataset_id == 0:
-        train_dataset = AGNewsDataset(data_path, 'train', reduce=True)
-        val_dataset = AGNewsDataset(data_path, 'val', reduce=True)
-        test_dataset = AGNewsDataset(data_path, 'test', reduce=True)
-    elif dataset_id == 1:
-        train_dataset = AmazonDataset(data_path, 'train', reduce=True)
-        val_dataset = AmazonDataset(data_path, 'val', reduce=True)
-        test_dataset = AmazonDataset(data_path, 'test', reduce=True)
-    elif dataset_id == 2:
-        train_dataset = YelpDataset(data_path, 'train', reduce=True)
-        val_dataset = YelpDataset(data_path, 'val', reduce=True)
-        test_dataset = YelpDataset(data_path, 'test', reduce=True)
-    elif dataset_id == 3:
-        train_dataset = DBPediaDataset(data_path, 'train', reduce=True)
-        val_dataset = DBPediaDataset(data_path, 'val', reduce=True)
-        test_dataset = DBPediaDataset(data_path, 'test', reduce=True)
-    elif dataset_id == 4:
-        train_dataset = YahooAnswersDataset(data_path, 'train', reduce=True)
-        val_dataset = YahooAnswersDataset(data_path, 'val', reduce=True)
-        test_dataset = YahooAnswersDataset(data_path, 'test', reduce=True)
-    else:
-        raise Exception('Invalid dataset ID')
-    return train_dataset, val_dataset, test_dataset
+    """Return a single dataset given its id and path.
+    
+    Train, validation,.and test sets are returned.
+    """
+    assert 0 <= dataset_id <= 4, "invalid dataset id"
+    dataset = DATASET_MAPPING[dataset_id]
+    return (
+        dataset(data_path, 'train', reduce=True),
+        dataset(data_path, 'val', reduce=True),
+        dataset(data_path, 'test', reduce=True),
+    ) 
+    # if dataset_id == 0:
+    #     train_dataset = AGNewsDataset(data_path, 'train', reduce=True)
+    #     val_dataset = AGNewsDataset(data_path, 'val', reduce=True)
+    #     test_dataset = AGNewsDataset(data_path, 'test', reduce=True)
+    # elif dataset_id == 1:
+    #     train_dataset = AmazonDataset(data_path, 'train', reduce=True)
+    #     val_dataset = AmazonDataset(data_path, 'val', reduce=True)
+    #     test_dataset = AmazonDataset(data_path, 'test', reduce=True)
+    # elif dataset_id == 2:
+    #     train_dataset = YelpDataset(data_path, 'train', reduce=True)
+    #     val_dataset = YelpDataset(data_path, 'val', reduce=True)
+    #     test_dataset = YelpDataset(data_path, 'test', reduce=True)
+    # elif dataset_id == 3:
+    #     train_dataset = DBPediaDataset(data_path, 'train', reduce=True)
+    #     val_dataset = DBPediaDataset(data_path, 'val', reduce=True)
+    #     test_dataset = DBPediaDataset(data_path, 'test', reduce=True)
+    # elif dataset_id == 4:
+    #     train_dataset = YahooAnswersDataset(data_path, 'train', reduce=True)
+    #     val_dataset = YahooAnswersDataset(data_path, 'val', reduce=True)
+    #     test_dataset = YahooAnswersDataset(data_path, 'test', reduce=True)
+    # else:
+    #     raise Exception('Invalid dataset ID')
+    # return train_dataset, val_dataset, test_dataset
+
+
+def get_datasets(data_path, data_order):
+    """
+    Load multiple datasets according to an order index, where the order
+    is defined by DATASET_ORDER_MAPPING in this file.
+    """
+    logging.info(f"Loading data...")
+    train_datasets, val_datasets, test_datasets = [], [], []
+    for dataset_id in DATASET_ORDER_MAPPING[data_order]:
+        train_dataset, val_dataset, test_dataset = get_dataset(data_path, dataset_id)
+        logging.info('Loaded {}'.format(train_dataset.__class__.__name__))
+        # the same model is used for all tasks, so we need to shift labels of tasks
+        train_dataset = offset_labels(train_dataset)
+        val_dataset = offset_labels(val_dataset)
+        test_dataset = offset_labels(test_dataset)
+        train_datasets.append(train_dataset)
+        val_datasets.append(val_dataset)
+        test_datasets.append(test_dataset)
+    logging.info('Finished loading all the datasets')
+    return {
+        'train': train_datasets,
+        'val': val_datasets,
+        'test': test_datasets,
+    }
+
+def offset_labels(dataset):
+    """Shift labels of dataset depending on the dataset"""
+    if isinstance(dataset, AmazonDataset) or isinstance(dataset, YelpDataset):
+        offset_by = 0
+    elif isinstance(dataset, AGNewsDataset):
+        offset_by = 5
+    elif isinstance(dataset, DBPediaDataset):
+        offset_by = 5 + 4
+    elif isinstance(dataset, YahooAnswersDataset):
+        offset_by = 5 + 4 + 14
+    dataset.data['labels'] = dataset.data['labels'] + offset_by
+    return dataset

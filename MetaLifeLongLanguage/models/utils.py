@@ -2,6 +2,12 @@ import torch
 import numpy as np
 from sklearn import metrics
 
+# from MetaLifeLongLanguage.models.cls_baseline import Baseline 
+# from MetaLifeLongLanguage.models.cls_agem import AGEM 
+# from MetaLifeLongLanguage.models.cls_anml import ANML 
+# from MetaLifeLongLanguage.models.cls_maml import MAML
+# from MetaLifeLongLanguage.models.cls_oml import OML 
+# from MetaLifeLongLanguage.models.cls_replay import Replay 
 
 def calculate_metrics(predictions, labels, binary=False):
     averaging = 'binary' if binary else 'macro'
@@ -47,16 +53,3 @@ def make_rel_prediction(cosine_sim, ranking_label):
     true_labels = torch.zeros_like(pred)
     return pred, true_labels
 
-
-def split_rel_scores(cosine_sim, ranking_label):
-    pos_scores, neg_scores = [], []
-    pos_index = 0
-    for i in range(len(ranking_label)):
-        if ranking_label[i] == 1:
-            pos_index = i
-        elif ranking_label[i] == -1:
-            pos_scores.append(cosine_sim[pos_index])
-            neg_scores.append(cosine_sim[i])
-    pos_scores = torch.stack(pos_scores)
-    neg_scores = torch.stack(neg_scores)
-    return pos_scores, neg_scores
