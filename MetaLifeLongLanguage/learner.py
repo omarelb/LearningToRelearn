@@ -22,6 +22,7 @@ from MetaLifeLongLanguage.datasets.text_classification_dataset import get_datase
 # plt.style.use('seaborn-paper')
 CHECKPOINTS = Path("model-checkpoints/")
 LOGS = Path("tensorboard-logs/")
+RESULTS = Path("results")
 BEST_MODEL_FNAME = "best-model.pt"
 
 
@@ -59,9 +60,11 @@ class Learner:
         self.data_dir = hydra.utils.to_absolute_path("data")
 
         # Tensorboard log directory
-        # self.log_dir = self.exp_dir / LOGS
-        # self.log_dir.mkdir(parents=True, exist_ok=True)
-        # self.writer = SummaryWriter(log_dir=self.log_dir)
+        self.log_dir = self.exp_dir / LOGS
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.writer = SummaryWriter(log_dir=self.log_dir)
+
+        self.results_dir = self.exp_dir / RESULTS
 
         self.logger.info("-"*50)
         self.logger.info("TRAINING LOG")
@@ -91,164 +94,32 @@ class Learner:
         #     self.logger.info(f"Loading model checkpoint from {last_checkpoint}")
         #     self.load_checkpoint(last_checkpoint.name)
 
-    def run(self):
-        """Run the train-eval loop
-        
-        If the loop is interrupted manually, finalization will still be executed
+    def testing(self, datasets):
         """
-        try:
-            self.logger.info(f"Begin training for {self.config.training.epochs} epochs")
-            self.train()
-        except KeyboardInterrupt:
-            self.logger.warning("Manual interruption registered. Please wait to finalize...")
-            self.finalize()
+        Parameters
+        ---
+        datasets: List[Dataset]
+            Test datasets.
+        """
+        accuracies, precisions, recalls, f1s = [], [], [], []
+        results = {}
+        for dataset in datasets:
+            dataset_name = dataset.__class__.__name__
+            logger.info('Testing on {}'.format(dataset_name))
+            test_dataloader = data.DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False,
+                                              collate_fn=batch_encode)
+            dataset_results = self.evaluate(dataloader=test_dataloader)
+            accuracies.append(results["accuracy"])
+            precisions.append(results["precision"])
+            recalls.append(results["recall"])
+            f1s.append(results["f1"])
+            results[dataset_name] = dataset_results
 
-    def train(self):
-        """ Main training loop """
-        num_batches = len(self.train_dl)
-        n_samples_per_batch = self.config.data.batch_size * self.config.data.block_size
-        for epoch in range(self.current_epoch, self.config.training.epochs):
-            self.logger.info(f'Current epoch: {self.current_epoch + 1} / {self.config.training.epochs}')
-            self.current_epoch = epoch
-            for i, batch in enumerate(self.train_dl):
-                self.current_iter += 1
-                t0 = time.time()
-                results = self._batch_iteration(batch, training=True)
-                time_spent = time.time() - t0
-
-                self.writer.add_scalar('Train/Accuracy', results['accuracy'], self.current_iter)
-                self.writer.add_scalar('Train/F1-Score', results['f1_score'], self.current_iter)
-                self.writer.add_scalar('Train/Loss', results['loss'], self.current_iter)
-                report = (f"EPOCH:{epoch + 1} STEP:{i}/{num_batches}\t"
-                          f"Accuracy: {results['accuracy']:.3f} "
-                          f"F1-Score: {results['f1_score']:.3f} "
-                          f"Speed: {n_samples_per_batch / time_spent :.1f} tokens/s ")
-                if i % self.config.training.train_report_freq == 0:
-                    self.logger.info(report)
-                if i % self.config.training.valid_freq == 0:
-                    self.validate()
-                if i % self.config.training.save_freq == 0:
-                    self.save_checkpoint()
-            self.lr_scheduler.step()
-
-    def validate(self):
-        """ Main validation loop """
-        self.model.eval()
-        losses = []
-        accuracies = []
-        f1_scores = []
-        Y, Y_pred = [], []
-
-        self.logger.debug("Begin evaluation over validation set")
-        with torch.no_grad():
-            for i, batch in enumerate(self.valid_dl):
-                results = self._batch_iteration(batch, training=False)
-                losses.append(results['loss'])
-                accuracies.append(results['accuracy'])
-                f1_scores.append(results['f1_score'])
-                Y.append(results['y'])
-                Y_pred.append(results['y_pred'])
-#        "classification_report": metrics.classification_report(
-#            y_true=[self.tokenizer.punctuation_decoder[int(x)][1:] for x in y],
-#            y_pred=[self.tokenizer.punctuation_decoder[int(x)][1:] for x in y_pred],
-#            labels=[punct[1:] for punct in self.tokenizer.punctuation_vocab],
-#            output_dict=True)
-            
-        Y, Y_pred = np.concatenate(Y), np.concatenate(Y_pred)
-        punctuation_labels = list(self.tokenizer.punctuation_vocab.keys())
-        classification_report = metrics.classification_report(Y, Y_pred, target_names=punctuation_labels, output_dict=True)
-        for label_name, numbers in classification_report.items():
-            if not isinstance(numbers, dict):
-                break
-            for metric, number in numbers.items():
-                self.writer.add_scalar(f'Valid/{label_name[1:]}/{metric.capitalize()}', number, self.current_iter)
-        mean_accuracy = np.mean(accuracies)
-        mean_loss = np.mean(losses)
-        mean_f1_score = np.mean(f1_scores)
-        # if mean_accuracy > self.best_accuracy:
-        #     self.best_accuracy = mean_accuracy
-        #     self.save_checkpoint(BEST_MODEL_FNAME)
-        if mean_loss < self.best_loss:
-            self.best_loss = mean_loss
-            self.save_checkpoint(BEST_MODEL_FNAME)
-        
-        self.writer.add_scalar('Valid/Accuracy', mean_accuracy, self.current_iter)
-        self.writer.add_scalar('Valid/F1-Score', mean_f1_score, self.current_iter)
-        self.writer.add_scalar('Valid/Loss', mean_loss, self.current_iter)
-        report = (f"[Validation]\t"
-                  f"Accuracy: {mean_accuracy:.3f} "
-                  f"F1-Score: {mean_f1_score:.3f} "
-                  f"Total Loss: {mean_loss:.3f}")
-        self.logger.info(report)
-
-    def test(self):
-        """ Model testing and evaluation """
-
-        print("Loading best model checkpoint... ")
-        self.load_checkpoint(BEST_MODEL_FNAME)
-        self.model.eval()
-        losses = []
-        Y, Y_pred = [], []
-
-        print("Begin testing...")
-        with torch.no_grad():
-            for i, batch in enumerate(self.test_dl):
-                results = self._batch_iteration(batch, training=False)
-                x = batch[0].to(self.config.training.device)
-                y = batch[1].to(self.config.training.device).contiguous().view(-1)
-                logits, _, _ = self.model(x)
-                logits = logits.contiguous().view(-1, logits.size(-1))
-                y_pred = torch.argmax(logits, dim=-1)
-                losses.append(self.loss_fn(logits, y).item())
-                Y.append(y.cpu().detach().numpy())
-                Y_pred.append(y_pred.cpu().detach().numpy())
-    
-        Y, Y_pred = np.concatenate(Y), np.concatenate(Y_pred)
-        loss = np.mean(losses)
-        accuracy = metrics.accuracy_score(Y, Y_pred)
-        f1_score = metrics.f1_score(Y, Y_pred, average='weighted')
-        punctuation_labels = list(self.tokenizer.punctuation_vocab.keys())
-        report = metrics.classification_report(Y, Y_pred, target_names=punctuation_labels)
-        summary = (f"\n[Test Report]\n"
-                   f"Accuracy: {accuracy:.3f} "
-                   f"F1-Score: {f1_score:.3f} "
-                   f"Loss: {loss:.3f}\n")
-        print(summary)
-        print(report)
-
-    def _batch_iteration(self, batch: Tuple, training: bool):
-        """ Iterate over one batch """
-        x = batch[0].to(self.config.training.device)
-        y = batch[1].to(self.config.training.device).contiguous().view(-1)
-        
-        if training:
-            self.model.train()
-            self.opt.zero_grad()
-            logits, _, _ = self.model(x)
-            logits = logits.contiguous().view(-1, logits.size(-1))
-            loss = self.loss_fn(logits, y)
-            loss.backward()
-            if self.config.training.max_grad_norm > 0:
-                nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.config.training.max_grad_norm)
-            self.opt.step()
-
-        else:
-            self.model.eval()
-            with torch.no_grad():
-                logits, _, _ = self.model(x)
-                logits = logits.contiguous().view(-1, logits.size(-1))
-                loss = self.loss_fn(logits, y)
-
-        y_pred = torch.argmax(logits, dim=-1).cpu().detach().numpy()
-        y = y.cpu().detach().numpy()
-        results = {
-            "loss": loss.item(),
-            "accuracy": metrics.accuracy_score(y, y_pred),
-            "f1_score":  metrics.f1_score(y, y_pred, average='weighted'),
-            "y": y,
-            "y_pred": y_pred
-        }
+        logger.info('Overall test metrics: Accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, '
+                    'F1 score = {:.4f}'.format(np.mean(accuracies), np.mean(precisions), np.mean(recalls),
+                                               np.mean(f1s)))
         return results
+
 
     def save_checkpoint(self, file_name: str = None):
         """Save checkpoint in the checkpoint directory.
@@ -269,8 +140,8 @@ class Learner:
             'iter': self.current_iter,
             'best_accuracy': self.best_accuracy,
             'best_loss': self.best_loss,
-            'model_state': self.model.state_dict(),
-            'optimizer': self.optimizer.state_dict(),
+            'model_state': self.model_state(),
+            'optimizer': self.optimizer_state(),
         }
         torch.save(state, file_name)
         self.logger.info(f"Checkpoint saved @ {file_name}")
@@ -299,21 +170,24 @@ class Learner:
             self.current_iter = checkpoint['iter']
             self.best_accuracy = checkpoint['best_accuracy']
             self.best_loss = checkpoint['best_loss']
-            self.model.load_state_dict(checkpoint['model_state'])
-            self.optimizer.load_state_dict(checkpoint['optimizer'])
+            self.load_model_state(checkpoint)
+            self.load_optimizer_state(checkpoint)
 
         except OSError:
             self.logger.error(f"No checkpoint exists @ {self.checkpoint_dir}")
-        
-    def finalize(self):
-        """Finalize all necessary operations before stopping
-        
-        Saves checkpoint
-        TODO: Upload to sharepoint
-        """
-        self.save_checkpoint()
-        # upload_sharepoint(self.model)
 
+    def model_state(self):
+        return self.model.state_dict()
+
+    def optimizer_state(self):
+        return self.optimizer.state_dict()
+
+    def load_model_state(self, checkpoint):
+        self.model.load_state_dict(checkpoint['model_state'])
+
+    def load_optimizer_state(self, checkpoint):
+        self.optimizer.load_state_dict(checkpoint['optimizer'])
+        
     def get_datasets(self, data_dir, order):
         return get_datasets(data_dir, order)
 

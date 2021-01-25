@@ -10,7 +10,7 @@ import numpy as np
 from torch.utils import data
 from transformers import AdamW
 
-import MetaLifeLongLanguage.datasets
+import MetaLifeLongLanguage.datasets.utils as dataset_utils
 import MetaLifeLongLanguage.models.utils as model_utils
 from MetaLifeLongLanguage.models.base_models import ReplayMemory, TransformerClsModel, TransformerNeuromodulator
 from MetaLifeLongLanguage.learner import Learner
@@ -18,23 +18,24 @@ from MetaLifeLongLanguage.learner import Learner
 logging.basicConfig(level='INFO', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('ANML-Log')
 
-
 class ANML(Learner):
+    def __init__(self, config):
+        super().__init__(config)
 
-    def __init__(self, device, n_classes, **kwargs):
-        self.inner_lr = kwargs.get('inner_lr')
-        self.meta_lr = kwargs.get('meta_lr')
-        self.write_prob = kwargs.get('write_prob')
-        self.replay_rate = kwargs.get('replay_rate')
-        self.replay_every = kwargs.get('replay_every')
-        self.device = device
+        self.inner_lr = config.training.inner_lr
+        self.meta_lr = config.training.meta_lr
+        self.write_prob = config.write_prob
+        self.replay_rate = config.replay_rate
+        self.replay_every = config.replay_every
+        self.device = config.training.device
+        self.mini_batch_size = config.training.batch_size
 
-        self.nm = TransformerNeuromodulator(model_name=kwargs.get('model'),
-                                            device=device)
-        self.pn = TransformerClsModel(model_name=kwargs.get('model'),
-                                      n_classes=n_classes,
-                                      max_length=kwargs.get('max_length'),
-                                      device=device)
+        self.nm = TransformerNeuromodulator(model_name=config.learner.model_name,
+                                            device=self.device)
+        self.pn = TransformerClsModel(model_name=config.learner.model_name,
+                                      n_classes=config.data.n_classes,
+                                      max_length=config.data.max_length,
+                                      device=self.device)
         self.memory = ReplayMemory(write_prob=self.write_prob, tuple_size=2)
         self.loss_fn = nn.CrossEntropyLoss()
 
@@ -48,102 +49,31 @@ class ANML(Learner):
         inner_params = [p for p in self.pn.parameters() if p.requires_grad]
         self.inner_optimizer = optim.SGD(inner_params, lr=self.inner_lr)
 
-    def save_model(self, model_path):
-        checkpoint = {'nm': self.nm.state_dict(),
-                      'pn': self.pn.state_dict()}
-        torch.save(checkpoint, model_path)
-
-    def load_model(self, model_path):
-        checkpoint = torch.load(model_path)
-        self.nm.load_state_dict(checkpoint['nm'])
-        self.pn.load_state_dict(checkpoint['pn'])
-
-    def evaluate(self, dataloader, updates, mini_batch_size):
-
-        support_set = []
-        for _ in range(updates):
-            text, labels = self.memory.read_batch(batch_size=mini_batch_size)
-            support_set.append((text, labels))
-
-        with higher.innerloop_ctx(self.pn, self.inner_optimizer,
-                                  copy_initial_weights=False,
-                                  track_higher_grads=False) as (fpn, diffopt):
-
-            # Inner loop
-            task_predictions, task_labels = [], []
-            support_loss = []
-            for text, labels in support_set:
-                labels = torch.tensor(labels).to(self.device)
-                input_dict = self.pn.encode_text(text)
-                repr = fpn(input_dict, out_from='transformers')
-                modulation = self.nm(input_dict)
-                output = fpn(repr * modulation, out_from='linear')
-                loss = self.loss_fn(output, labels)
-                diffopt.step(loss)
-                pred = model_utils.make_prediction(output.detach())
-                support_loss.append(loss.item())
-                task_predictions.extend(pred.tolist())
-                task_labels.extend(labels.tolist())
-
-            acc, prec, rec, f1 = model_utils.calculate_metrics(task_predictions, task_labels)
-
-            logger.info('Support set metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, '
-                        'recall = {:.4f}, F1 score = {:.4f}'.format(np.mean(support_loss), acc, prec, rec, f1))
-
-            all_losses, all_predictions, all_labels = [], [], []
-
-            for text, labels in dataloader:
-                labels = torch.tensor(labels).to(self.device)
-                input_dict = self.pn.encode_text(text)
-                with torch.no_grad():
-                    repr = fpn(input_dict, out_from='transformers')
-                    modulation = self.nm(input_dict)
-                    output = fpn(repr * modulation, out_from='linear')
-                    loss = self.loss_fn(output, labels)
-                loss = loss.item()
-                pred = model_utils.make_prediction(output.detach())
-                all_losses.append(loss)
-                all_predictions.extend(pred.tolist())
-                all_labels.extend(labels.tolist())
-
-        acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
-        logger.info('Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, '
-                    'F1 score = {:.4f}'.format(np.mean(all_losses), acc, prec, rec, f1))
-
-        return acc, prec, rec, f1
-
-    def training(self, train_datasets, **kwargs):
-        updates = kwargs.get('updates')
-        mini_batch_size = kwargs.get('mini_batch_size')
-
+    def training(self, datasets, **kwargs):
         if self.replay_rate != 0:
-            replay_batch_freq = self.replay_every // mini_batch_size
-            replay_freq = int(math.ceil((replay_batch_freq + 1) / (updates + 1)))
-            replay_steps = int(self.replay_every * self.replay_rate / mini_batch_size)
+            replay_batch_freq = self.replay_every // self.mini_batch_size
+            replay_freq = int(math.ceil((replay_batch_freq + 1) / (self.config.updates + 1)))
+            replay_steps = int(self.replay_every * self.replay_rate / self.mini_batch_size)
         else:
             replay_freq = 0
             replay_steps = 0
         logger.info('Replay frequency: {}'.format(replay_freq))
         logger.info('Replay steps: {}'.format(replay_steps))
 
-        concat_dataset = data.ConcatDataset(train_datasets)
-        train_dataloader = iter(data.DataLoader(concat_dataset, batch_size=mini_batch_size, shuffle=False,
-                                                collate_fn=datasets.utils.batch_encode))
-
-        episode_id = 0
+        concat_dataset = data.ConcatDataset(datasets["train"])
+        train_dataloader = iter(data.DataLoader(concat_dataset, batch_size=self.mini_batch_size, shuffle=False,
+                                                collate_fn=dataset_utils.batch_encode))
         while True:
-
             self.inner_optimizer.zero_grad()
             support_loss, support_acc, support_prec, support_rec, support_f1 = [], [], [], [], []
 
             with higher.innerloop_ctx(self.pn, self.inner_optimizer,
                                       copy_initial_weights=False,
                                       track_higher_grads=False) as (fpn, diffopt):
-
                 # Inner loop
                 support_set = []
                 task_predictions, task_labels = [], []
-                for _ in range(updates):
+                for _ in range(self.config.updates):
                     try:
                         text, labels = next(train_dataloader)
                         support_set.append((text, labels))
@@ -167,17 +97,22 @@ class ANML(Learner):
 
                 acc, prec, rec, f1 = model_utils.calculate_metrics(task_predictions, task_labels)
 
-                logger.info('Episode {} support set: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, '
-                            'recall = {:.4f}, F1 score = {:.4f}'.format(episode_id + 1,
+                self.logger.info('Episode {} support set: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, '
+                            'recall = {:.4f}, F1 score = {:.4f}'.format(self.current_iter + 1,
                                                                         np.mean(support_loss), acc, prec, rec, f1))
+                self.writer.add_scalar('Train/Support/Accuracy', acc, self.current_iter)
+                self.writer.add_scalar('Train/Support/Precision', prec, self.current_iter)
+                self.writer.add_scalar('Train/Support/Recall', rec, self.current_iter)
+                self.writer.add_scalar('Train/Support/F1-Score', f1, self.current_iter)
+                self.writer.add_scalar('Train/Support/Loss', np.mean(support_loss), self.current_iter)
 
                 # Outer loop
                 query_loss, query_acc, query_prec, query_rec, query_f1 = [], [], [], [], []
                 query_set = []
 
-                if self.replay_rate != 0 and (episode_id + 1) % replay_freq == 0:
+                if self.replay_rate != 0 and (self.current_iter + 1) % replay_freq == 0:
                     for _ in range(replay_steps):
-                        text, labels = self.memory.read_batch(batch_size=mini_batch_size)
+                        text, labels = self.memory.read_batch(batch_size=self.mini_batch_size)
                         query_set.append((text, labels))
                 else:
                     try:
@@ -228,29 +163,80 @@ class ANML(Learner):
                 self.meta_optimizer.zero_grad()
 
                 logger.info('Episode {} query set: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, '
-                            'recall = {:.4f}, F1 score = {:.4f}'.format(episode_id + 1,
+                            'recall = {:.4f}, F1 score = {:.4f}'.format(self.current_iter + 1,
                                                                         np.mean(query_loss), np.mean(query_acc),
                                                                         np.mean(query_prec), np.mean(query_rec),
                                                                         np.mean(query_f1)))
+                self.writer.add_scalar('Train/Query/Accuracy', np.mean(query_acc), self.current_iter)
+                self.writer.add_scalar('Train/Query/Precision', np.mean(query_prec), self.current_iter)
+                self.writer.add_scalar('Train/Query/Recall', np.mean(query_rec), self.current_iter)
+                self.writer.add_scalar('Train/Query/F1-Score', np.mean(query_f1), self.current_iter)
+                self.writer.add_scalar('Train/Query/Loss', np.mean(query_loss), self.current_iter)
 
-                episode_id += 1
+                self.current_iter += 1
 
-    def testing(self, test_datasets, **kwargs):
-        updates = kwargs.get('updates')
-        mini_batch_size = kwargs.get('mini_batch_size')
-        accuracies, precisions, recalls, f1s = [], [], [], []
-        for test_dataset in test_datasets:
-            logger.info('Testing on {}'.format(test_dataset.__class__.__name__))
-            test_dataloader = data.DataLoader(test_dataset, batch_size=mini_batch_size, shuffle=False,
-                                              collate_fn=datasets.utils.batch_encode)
-            acc, prec, rec, f1 = self.evaluate(dataloader=test_dataloader, updates=updates, mini_batch_size=mini_batch_size)
-            accuracies.append(acc)
-            precisions.append(prec)
-            recalls.append(rec)
-            f1s.append(f1)
+    def evaluate(self, dataloader, updates, mini_batch_size):
+        support_set = []
+        for _ in range(updates):
+            text, labels = self.memory.read_batch(batch_size=mini_batch_size)
+            support_set.append((text, labels))
 
-        logger.info('Overall test metrics: Accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, '
-                    'F1 score = {:.4f}'.format(np.mean(accuracies), np.mean(precisions), np.mean(recalls),
-                                               np.mean(f1s)))
+        with higher.innerloop_ctx(self.pn, self.inner_optimizer,
+                                  copy_initial_weights=False,
+                                  track_higher_grads=False) as (fpn, diffopt):
+            # Inner loop
+            task_predictions, task_labels = [], []
+            support_loss = []
+            for text, labels in support_set:
+                labels = torch.tensor(labels).to(self.device)
+                input_dict = self.pn.encode_text(text)
+                repr = fpn(input_dict, out_from='transformers')
+                modulation = self.nm(input_dict)
+                output = fpn(repr * modulation, out_from='linear')
+                loss = self.loss_fn(output, labels)
+                diffopt.step(loss)
+                pred = model_utils.make_prediction(output.detach())
+                support_loss.append(loss.item())
+                task_predictions.extend(pred.tolist())
+                task_labels.extend(labels.tolist())
 
-        return accuracies
+            acc, prec, rec, f1 = model_utils.calculate_metrics(task_predictions, task_labels)
+
+            logger.info('Support set metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, '
+                        'recall = {:.4f}, F1 score = {:.4f}'.format(np.mean(support_loss), acc, prec, rec, f1))
+
+            all_losses, all_predictions, all_labels = [], [], []
+
+            for text, labels in dataloader:
+                labels = torch.tensor(labels).to(self.device)
+                input_dict = self.pn.encode_text(text)
+                with torch.no_grad():
+                    repr = fpn(input_dict, out_from='transformers')
+                    modulation = self.nm(input_dict)
+                    output = fpn(repr * modulation, out_from='linear')
+                    loss = self.loss_fn(output, labels)
+                loss = loss.item()
+                pred = model_utils.make_prediction(output.detach())
+                all_losses.append(loss)
+                all_predictions.extend(pred.tolist())
+                all_labels.extend(labels.tolist())
+
+        acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
+        logger.info('Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, '
+                    'F1 score = {:.4f}'.format(np.mean(all_losses), acc, prec, rec, f1))
+
+        return {"accuracy": acc, "precision": prec, "recall": rec, "f1": f1}
+
+    def model_state(self):
+        return {'nm': self.nm.state_dict(),
+                'pn': self.pn.state_dict()}
+
+    def optimizer_state(self):
+        return self.meta_optimizer.state_dict()
+
+    def load_model_state(self, checkpoint):
+        self.nm.load_state_dict(checkpoint["model_state"]["nm"])
+        self.pn.load_state_dict(checkpoint["model_state"]["pn"])
+
+    def load_optimizer_state(self, checkpoint):
+        self.meta_optimizer.load_state_dict(checkpoint['optimizer'])

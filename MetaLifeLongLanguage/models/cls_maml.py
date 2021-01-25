@@ -10,7 +10,7 @@ import numpy as np
 from torch.utils import data
 from transformers import AdamW
 
-import MetaLifeLongLanguage.datasets
+import MetaLifeLongLanguage.datasets.utils as dataset_utils
 import MetaLifeLongLanguage.models.utils as model_utils
 from MetaLifeLongLanguage.models.base_models import ReplayMemory, TransformerClsModel
 from MetaLifeLongLanguage.learner import Learner
@@ -100,7 +100,7 @@ class MAML(Learner):
         logger.info('Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, '
                     'F1 score = {:.4f}'.format(np.mean(all_losses), acc, prec, rec, f1))
 
-        return acc, prec, rec, f1
+        return {"accuracy": acc, "precision": prec, "recall": rec, "f1": f1}
 
     def training(self, train_datasets, **kwargs):
         updates = kwargs.get('updates')
@@ -118,7 +118,7 @@ class MAML(Learner):
 
         concat_dataset = data.ConcatDataset(train_datasets)
         train_dataloader = iter(data.DataLoader(concat_dataset, batch_size=mini_batch_size, shuffle=False,
-                                                collate_fn=datasets.utils.batch_encode))
+                                                collate_fn=dataset_utils.batch_encode))
 
         episode_id = 0
         while True:
@@ -211,23 +211,3 @@ class MAML(Learner):
                                                                         np.mean(query_f1)))
 
                 episode_id += 1
-
-    def testing(self, test_datasets, **kwargs):
-        updates = kwargs.get('updates')
-        mini_batch_size = kwargs.get('mini_batch_size')
-        accuracies, precisions, recalls, f1s = [], [], [], []
-        for test_dataset in test_datasets:
-            logger.info('Testing on {}'.format(test_dataset.__class__.__name__))
-            test_dataloader = data.DataLoader(test_dataset, batch_size=mini_batch_size, shuffle=False,
-                                              collate_fn=datasets.utils.batch_encode)
-            acc, prec, rec, f1 = self.evaluate(dataloader=test_dataloader, updates=updates, mini_batch_size=mini_batch_size)
-            accuracies.append(acc)
-            precisions.append(prec)
-            recalls.append(rec)
-            f1s.append(f1)
-
-        logger.info('Overall test metrics: Accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, '
-                    'F1 score = {:.4f}'.format(np.mean(accuracies), np.mean(precisions), np.mean(recalls),
-                                               np.mean(f1s)))
-
-        return accuracies

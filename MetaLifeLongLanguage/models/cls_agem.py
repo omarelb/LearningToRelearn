@@ -7,7 +7,7 @@ import numpy as np
 from torch.utils import data
 from transformers import AdamW
 
-import MetaLifeLongLanguage.datasets
+import MetaLifeLongLanguage.datasets.utils as dataset_utils
 import MetaLifeLongLanguage.models.utils as model_utils
 from MetaLifeLongLanguage.models.base_models import TransformerClsModel, ReplayMemory
 from MetaLifeLongLanguage.learner import Learner
@@ -15,7 +15,6 @@ from MetaLifeLongLanguage.datasets.utils import batch_encode
 
 logging.basicConfig(level='INFO', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('AGEM-Log')
-
 
 class AGEM(Learner):
     def __init__(self, config):
@@ -144,26 +143,6 @@ class AGEM(Learner):
 
         return {"accuracy": acc, "precision": prec, "recall": rec, "f1": f1}
 
-    def testing(self, datasets):
-        accuracies, precisions, recalls, f1s = [], [], [], []
-        results = {}
-        for dataset in datasets:
-            dataset_name = dataset.__class__.__name__
-            logger.info('Testing on {}'.format(dataset_name))
-            test_dataloader = data.DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False,
-                                              collate_fn=batch_encode)
-            dataset_results = self.evaluate(dataloader=test_dataloader)
-            accuracies.append(results["accuracy"])
-            precisions.append(results["precision"])
-            recalls.append(results["recall"])
-            f1s.append(results["f1"])
-            results[dataset_name] = dataset_results
-
-        logger.info('Overall test metrics: Accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, '
-                    'F1 score = {:.4f}'.format(np.mean(accuracies), np.mean(precisions), np.mean(recalls),
-                                               np.mean(f1s)))
-        return results
-
     def compute_grad(self, orig_grad, ref_grad):
         """Computes gradient according to the AGEM method"""
         with torch.no_grad():
@@ -175,11 +154,3 @@ class AGEM(Learner):
             proj_component = dot_product / torch.dot(flat_ref_grad, flat_ref_grad)
             modified_grad = [o - proj_component * r for (o, r) in zip(orig_grad, ref_grad)]
             return modified_grad
-
-    def save_model(self, model_path):
-        checkpoint = self.model.state_dict()
-        torch.save(checkpoint, model_path)
-
-    def load_model(self, model_path):
-        checkpoint = torch.load(model_path)
-        self.model.load_state_dict(checkpoint)
