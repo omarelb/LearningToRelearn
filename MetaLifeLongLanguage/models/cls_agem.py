@@ -13,8 +13,8 @@ from MetaLifeLongLanguage.models.base_models import TransformerClsModel, ReplayM
 from MetaLifeLongLanguage.learner import Learner
 from MetaLifeLongLanguage.datasets.utils import batch_encode
 
-logging.basicConfig(level='INFO', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger('AGEM-Log')
+logging.basicConfig(level="INFO", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("AGEM-Log")
 
 class AGEM(Learner):
     def __init__(self, config):
@@ -33,7 +33,7 @@ class AGEM(Learner):
                                          max_length=config.data.max_length,
                                          device=self.device)
         self.memory = ReplayMemory(write_prob=self.write_prob, tuple_size=2)
-        self.logger.info('Loaded {} as model'.format(self.model.__class__.__name__))
+        self.logger.info("Loaded {} as model".format(self.model.__class__.__name__))
 
         self.loss_fn = nn.CrossEntropyLoss()
         self.optimizer = AdamW([p for p in self.model.parameters() if p.requires_grad], lr=self.lr)
@@ -112,13 +112,13 @@ class AGEM(Learner):
     def write_log(self, all_predictions, all_labels, all_losses):
         acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
         self.logger.info(
-            'Iteration {} metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, '
-            'F1 score = {:.4f}'.format(self.current_iter + 1, np.mean(all_losses), acc, prec, rec, f1))
-        self.writer.add_scalar('Train/Accuracy', acc, self.current_iter)
-        self.writer.add_scalar('Train/Precision', prec, self.current_iter)
-        self.writer.add_scalar('Train/Recall', rec, self.current_iter)
-        self.writer.add_scalar('Train/F1-Score', f1, self.current_iter)
-        self.writer.add_scalar('Train/Loss', np.mean(all_losses), self.current_iter)
+            "Iteration {} metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
+            "F1 score = {:.4f}".format(self.current_iter + 1, np.mean(all_losses), acc, prec, rec, f1))
+        self.writer.add_scalar("Train/Accuracy", acc, self.current_iter)
+        self.writer.add_scalar("Train/Precision", prec, self.current_iter)
+        self.writer.add_scalar("Train/Recall", rec, self.current_iter)
+        self.writer.add_scalar("Train/F1-Score", f1, self.current_iter)
+        self.writer.add_scalar("Train/Loss", np.mean(all_losses), self.current_iter)
 
     def evaluate(self, dataloader):
         all_losses, all_predictions, all_labels = [], [], []
@@ -138,8 +138,8 @@ class AGEM(Learner):
             all_labels.extend(labels.tolist())
 
         acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
-        logger.info('Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, '
-                    'F1 score = {:.4f}'.format(np.mean(all_losses), acc, prec, rec, f1))
+        logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
+                    "F1 score = {:.4f}".format(np.mean(all_losses), acc, prec, rec, f1))
 
         return {"accuracy": acc, "precision": prec, "recall": rec, "f1": f1}
 

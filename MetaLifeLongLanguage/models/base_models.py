@@ -18,34 +18,34 @@ class TransformerClsModel(nn.Module):
         self.n_classes = n_classes
         self.max_length = max_length
         self.device = device
-        if model_name == 'albert':
-            self.tokenizer = AlbertTokenizer.from_pretrained('albert-base-v2')
-            self.encoder = AlbertModel.from_pretrained('albert-base-v2')
-        elif model_name == 'bert':
-            self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-            self.encoder = BertModel.from_pretrained('bert-base-uncased')
+        if model_name == "albert":
+            self.tokenizer = AlbertTokenizer.from_pretrained("albert-base-v2")
+            self.encoder = AlbertModel.from_pretrained("albert-base-v2")
+        elif model_name == "bert":
+            self.tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+            self.encoder = BertModel.from_pretrained("bert-base-uncased")
         else:
-            raise ValueError(f'Specify a valid model name. Current model name: {model_name}')
+            raise ValueError(f"Specify a valid model name. Current model name: {model_name}")
         self.linear = nn.Linear(TRANSFORMER_HDIM, n_classes)
         self.to(self.device)
 
     def encode_text(self, text):
         encode_result = self.tokenizer.batch_encode_plus(text, return_token_type_ids=False, max_length=self.max_length,
-                                                         truncation=True, padding='max_length', return_tensors='pt')
+                                                         truncation=True, padding="max_length", return_tensors="pt")
         for key in encode_result:
             encode_result[key] = encode_result[key].to(self.device)
         return encode_result
 
-    def forward(self, inputs, out_from='full'):
-        if out_from == 'full':
-            _, out = self.encoder(inputs['input_ids'], attention_mask=inputs['attention_mask'])
+    def forward(self, inputs, out_from="full"):
+        if out_from == "full":
+            _, out = self.encoder(inputs["input_ids"], attention_mask=inputs["attention_mask"])
             out = self.linear(out)
-        elif out_from == 'transformers':
-            _, out = self.encoder(inputs['input_ids'], attention_mask=inputs['attention_mask'])
-        elif out_from == 'linear':
+        elif out_from == "transformers":
+            _, out = self.encoder(inputs["input_ids"], attention_mask=inputs["attention_mask"])
+        elif out_from == "linear":
             out = self.linear(inputs)
         else:
-            raise ValueError('Invalid value of argument')
+            raise ValueError("Invalid value of argument")
         return out
 
 
@@ -55,25 +55,25 @@ class TransformerRLN(nn.Module):
         super().__init__()
         self.max_length = max_length
         self.device = device
-        if model_name == 'albert':
-            self.tokenizer = AlbertTokenizer.from_pretrained('albert-base-v2')
-            self.encoder = AlbertModel.from_pretrained('albert-base-v2')
-        elif model_name == 'bert':
-            self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-            self.encoder = BertModel.from_pretrained('bert-base-uncased')
+        if model_name == "albert":
+            self.tokenizer = AlbertTokenizer.from_pretrained("albert-base-v2")
+            self.encoder = AlbertModel.from_pretrained("albert-base-v2")
+        elif model_name == "bert":
+            self.tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+            self.encoder = BertModel.from_pretrained("bert-base-uncased")
         else:
-            raise ValueError(f'Specify a valid model name. Current model name: {model_name}')
+            raise ValueError(f"Specify a valid model name. Current model name: {model_name}")
         self.to(self.device)
 
     def encode_text(self, text):
         encode_result = self.tokenizer.batch_encode_plus(text, return_token_type_ids=False, max_length=self.max_length,
-                                                         truncation=True, padding='max_length', return_tensors='pt')
+                                                         truncation=True, padding="max_length", return_tensors="pt")
         for key in encode_result:
             encode_result[key] = encode_result[key].to(self.device)
         return encode_result
 
     def forward(self, inputs):
-        _, out = self.encoder(inputs['input_ids'], attention_mask=inputs['attention_mask'])
+        _, out = self.encoder(inputs["input_ids"], attention_mask=inputs["attention_mask"])
         return out
 
 
@@ -93,12 +93,12 @@ class TransformerNeuromodulator(nn.Module):
     def __init__(self, model_name, device):
         super().__init__()
         self.device = device
-        if model_name == 'albert':
-            self.encoder = AlbertModel.from_pretrained('albert-base-v2')
-        elif model_name == 'bert':
-            self.encoder = BertModel.from_pretrained('bert-base-uncased')
+        if model_name == "albert":
+            self.encoder = AlbertModel.from_pretrained("albert-base-v2")
+        elif model_name == "bert":
+            self.encoder = BertModel.from_pretrained("bert-base-uncased")
         else:
-            raise ValueError(f'Specify a valid model name. Current model name: {model_name}')
+            raise ValueError(f"Specify a valid model name. Current model name: {model_name}")
         self.encoder.requires_grad = False
         self.linear = nn.Sequential(nn.Linear(TRANSFORMER_HDIM, TRANSFORMER_HDIM),
                                     nn.ReLU(),
@@ -106,8 +106,8 @@ class TransformerNeuromodulator(nn.Module):
                                     nn.Sigmoid())
         self.to(self.device)
 
-    def forward(self, inputs, out_from='full'):
-        _, out = self.encoder(inputs['input_ids'], attention_mask=inputs['attention_mask'])
+    def forward(self, inputs, out_from="full"):
+        _, out = self.encoder(inputs["input_ids"], attention_mask=inputs["attention_mask"])
         out = self.linear(out)
         return out
 

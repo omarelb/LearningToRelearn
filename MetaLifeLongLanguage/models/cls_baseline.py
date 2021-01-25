@@ -12,8 +12,8 @@ import MetaLifeLongLanguage.models.utils as model_utils
 from MetaLifeLongLanguage.models.base_models import TransformerClsModel
 from MetaLifeLongLanguage.learner import Learner
 
-logging.basicConfig(level='INFO', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger('Baseline-Log')
+logging.basicConfig(level="INFO", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("Baseline-Log")
 
 
 class Baseline(Learner):
@@ -49,7 +49,7 @@ class Baseline(Learner):
                                          n_classes=n_classes,
                                          max_length=max_length,
                                          device=device)
-        logger.info('Loaded {} as model'.format(self.model.__class__.__name__))
+        logger.info("Loaded {} as model".format(self.model.__class__.__name__))
         self.loss_fn = nn.CrossEntropyLoss()
         self.optimizer = AdamW([p for p in self.model.parameters() if p.requires_grad], lr=self.lr)
 
@@ -87,8 +87,8 @@ class Baseline(Learner):
                 if iter % log_freq == 0:
                     acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
                     logger.info(
-                        'Epoch {} metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, '
-                        'F1 score = {:.4f}'.format(epoch + 1, np.mean(all_losses), acc, prec, rec, f1))
+                        "Epoch {} metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
+                        "F1 score = {:.4f}".format(epoch + 1, np.mean(all_losses), acc, prec, rec, f1))
                     all_losses, all_predictions, all_labels = [], [], []
 
     def evaluate(self, dataloader):
@@ -109,27 +109,27 @@ class Baseline(Learner):
             all_labels.extend(labels.tolist())
 
         acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
-        logger.info('Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, '
-                    'F1 score = {:.4f}'.format(np.mean(all_losses), acc, prec, rec, f1))
+        logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
+                    "F1 score = {:.4f}".format(np.mean(all_losses), acc, prec, rec, f1))
 
         return {"accuracy": acc, "precision": prec, "recall": rec, "f1": f1}
 
     def training(self, train_datasets, val_datasets, **kwargs):
         #TODO: use val_datasets
-        n_epochs = kwargs.get('n_epochs', 1)
-        log_freq = kwargs.get('log_freq', 500)
-        mini_batch_size = kwargs.get('mini_batch_size')
-        if self.training_mode == 'sequential':
+        n_epochs = kwargs.get("n_epochs", 1)
+        log_freq = kwargs.get("log_freq", 500)
+        mini_batch_size = kwargs.get("mini_batch_size")
+        if self.training_mode == "sequential":
             for train_dataset in train_datasets:
-                logger.info('Training on {}'.format(train_dataset.__class__.__name__))
+                logger.info("Training on {}".format(train_dataset.__class__.__name__))
                 train_dataloader = data.DataLoader(train_dataset, batch_size=mini_batch_size, shuffle=False,
                                                    collate_fn=dataset_utils.batch_encode)
                 self.train(dataloader=train_dataloader, n_epochs=n_epochs, log_freq=log_freq)
-        elif self.training_mode == 'multi_task':
+        elif self.training_mode == "multi_task":
             train_dataset = data.ConcatDataset(train_datasets)
-            logger.info('Training multi-task model on all datasets')
+            logger.info("Training multi-task model on all datasets")
             train_dataloader = data.DataLoader(train_dataset, batch_size=mini_batch_size, shuffle=True,
                                                collate_fn=dataset_utils.batch_encode)
             self.train(dataloader=train_dataloader, n_epochs=n_epochs, log_freq=log_freq)
         else:
-            raise ValueError('Invalid training mode')
+            raise ValueError("Invalid training mode")

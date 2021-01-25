@@ -10,7 +10,7 @@ from sklearn import metrics
 # from MetaLifeLongLanguage.models.cls_replay import Replay 
 
 def calculate_metrics(predictions, labels, binary=False):
-    averaging = 'binary' if binary else 'macro'
+    averaging = "binary" if binary else "macro"
     predictions = np.array(predictions)
     labels = np.array(labels)
     unique_labels = np.unique(labels)

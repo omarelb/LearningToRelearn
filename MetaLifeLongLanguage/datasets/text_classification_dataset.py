@@ -33,9 +33,9 @@ def preprocess(text):
     text = re.sub(r"&lt;", "<", text)
     text = re.sub(r"&gt;", ">", text)
     text = re.sub(r"\\\$", "$", text)
-    # removes '\n' present explicitly
+    # removes "\n" present explicitly
     text = re.sub(r"(\\n)+", " ", text)
-    # removes '\\'
+    # removes "\\"
     text = re.sub(r"(\\\\)+", "", text)
     # replaces repeated punctuation marks with single punctuation followed by a space
     # e.g, what???? -> what?
@@ -44,7 +44,7 @@ def preprocess(text):
     text = re.sub(r" #39;", "'", text)
     # quotation marks are wrongly encoded as this sequence
     text = re.sub(r"quot;", "\"", text)
-    # # replace decimal of the type x.y with x since decimal digits after '.' do not affect, e.g, 1.25 -> 1
+    # # replace decimal of the type x.y with x since decimal digits after "." do not affect, e.g, 1.25 -> 1
     # text = re.sub(r"(\d+)\.(\d+)", r"\1", text)
     # removes hyperlinks
     text = re.sub(r"https?:\/\/\S+\b|www\.(\w+\.)+\S*", "", text)
@@ -55,7 +55,7 @@ def preprocess(text):
     return str(text)
 
 
-def cache_filename(file_path, split, ext='.csv'):
+def cache_filename(file_path, split, ext=".csv"):
     """Create filename of preprocessed file from dataset settings."""
     file_path = Path(file_path)
     folder = file_path.parent
@@ -116,7 +116,7 @@ class ClassificationDataset(data.Dataset):
                     self.data = train if split == "train" else val
                 else:
                     self.data = self.data.sample(n=MAX_TEST_SIZE, random_state=SAMPLE_SEED)
-            self.data['text'] = self.data['text'].apply(preprocess)
+            self.data["text"] = self.data["text"].apply(preprocess)
         if load_preprocessed_from_cache and not cache_file.is_file():
             self.data.to_csv(cache_file, index=False)
 
@@ -124,14 +124,14 @@ class ClassificationDataset(data.Dataset):
         """
         Implements how data should be read from a file.
         """
-        raise NotImplementedError(f'The method read_data should be implemented for subclass of {type(self)}')
+        raise NotImplementedError(f"The method read_data should be implemented for subclass of {type(self)}")
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, index):
-        text = self.data['text'].iloc[index]
-        label = self.data['labels'].iloc[index]
+        text = self.data["text"].iloc[index]
+        label = self.data["labels"].iloc[index]
         return text, label
 
 
@@ -142,18 +142,18 @@ class AGNewsDataset(ClassificationDataset):
             Location of the data folder.
         """
         paths = {
-            'train': Path(data_path) / 'ag_news_csv/train.csv',
-            'val': Path(data_path) / 'ag_news_csv/train.csv',
-            'test': Path(data_path) / 'ag_news_csv/test.csv'
+            "train": Path(data_path) / "ag_news_csv/train.csv",
+            "val": Path(data_path) / "ag_news_csv/train.csv",
+            "test": Path(data_path) / "ag_news_csv/test.csv"
         }
         super().__init__(paths[split], split, n_classes=4, reduce=reduce, load_preprocessed_from_cache=load_preprocessed_from_cache)
 
     def read_data(self, file_path):
-        data = pd.read_csv(file_path, header=None, sep=',', names=['labels', 'title', 'description'],
+        data = pd.read_csv(file_path, header=None, sep=",", names=["labels", "title", "description"],
                                 index_col=False)
-        data['text'] = data['title'] + '. ' + data['description']
-        data['labels'] = data['labels'] - 1
-        data.drop(columns=['title', 'description'], inplace=True)
+        data["text"] = data["title"] + ". " + data["description"]
+        data["labels"] = data["labels"] - 1
+        data.drop(columns=["title", "description"], inplace=True)
         data.dropna(inplace=True)
         return data
 
@@ -161,74 +161,74 @@ class AGNewsDataset(ClassificationDataset):
 class DBPediaDataset(ClassificationDataset):
     def __init__(self, data_path, split, reduce=False, load_preprocessed_from_cache=True):
         paths = {
-            'train': Path(data_path) / 'dbpedia_csv/train.csv',
-            'val': Path(data_path) / 'dbpedia_csv/train.csv',
-            'test': Path(data_path) / 'dbpedia_csv/test.csv'
+            "train": Path(data_path) / "dbpedia_csv/train.csv",
+            "val": Path(data_path) / "dbpedia_csv/train.csv",
+            "test": Path(data_path) / "dbpedia_csv/test.csv"
         }
         super().__init__(paths[split], split, n_classes=14, reduce=reduce, load_preprocessed_from_cache=load_preprocessed_from_cache)
 
     def read_data(self, file_path):
-        data = pd.read_csv(file_path, header=None, sep=',', names=['labels', 'title', 'description'],
+        data = pd.read_csv(file_path, header=None, sep=",", names=["labels", "title", "description"],
                                 index_col=False)
-        data['text'] = data['title'] + '. ' + data['description']
-        data['labels'] = data['labels'] - 1
-        data.drop(columns=['title', 'description'], inplace=True)
+        data["text"] = data["title"] + ". " + data["description"]
+        data["labels"] = data["labels"] - 1
+        data.drop(columns=["title", "description"], inplace=True)
         data.dropna(inplace=True)
         return data
 
 class AmazonDataset(ClassificationDataset):
     def __init__(self, data_path, split, reduce=False, load_preprocessed_from_cache=True):
         paths = {
-            'train': Path(data_path) / 'amazon_review_full_csv/train.csv',
-            'val': Path(data_path) / 'amazon_review_full_csv/train.csv',
-            'test': Path(data_path) / 'amazon_review_full_csv/test.csv'
+            "train": Path(data_path) / "amazon_review_full_csv/train.csv",
+            "val": Path(data_path) / "amazon_review_full_csv/train.csv",
+            "test": Path(data_path) / "amazon_review_full_csv/test.csv"
         }
         super().__init__(paths[split], split, n_classes=5, reduce=reduce, load_preprocessed_from_cache=load_preprocessed_from_cache)
 
     def read_data(self, file_path):
-        data = pd.read_csv(file_path, header=None, sep=',', names=['labels', 'title', 'description'],
+        data = pd.read_csv(file_path, header=None, sep=",", names=["labels", "title", "description"],
                                 index_col=False)
         data.dropna(inplace=True)
-        data['text'] = data['title'] + '. ' + data['description']
-        data['labels'] = data['labels'] - 1
-        data.drop(columns=['title', 'description'], inplace=True)
+        data["text"] = data["title"] + ". " + data["description"]
+        data["labels"] = data["labels"] - 1
+        data.drop(columns=["title", "description"], inplace=True)
         return data
 
 
 class YelpDataset(ClassificationDataset):
     def __init__(self, data_path, split, reduce=False, load_preprocessed_from_cache=True):
         paths = {
-            'train': Path(data_path) / 'yelp_review_full_csv/train.csv',
-            'val': Path(data_path) / 'yelp_review_full_csv/train.csv',
-            'test': Path(data_path) / 'yelp_review_full_csv/test.csv'
+            "train": Path(data_path) / "yelp_review_full_csv/train.csv",
+            "val": Path(data_path) / "yelp_review_full_csv/train.csv",
+            "test": Path(data_path) / "yelp_review_full_csv/test.csv"
         }
         super().__init__(paths[split], split, n_classes=5, reduce=reduce, load_preprocessed_from_cache=load_preprocessed_from_cache)
 
     def read_data(self, file_path):
-        data = pd.read_csv(file_path, header=None, sep=',', names=['labels', 'text'],
+        data = pd.read_csv(file_path, header=None, sep=",", names=["labels", "text"],
                                 index_col=False)
         data.dropna(inplace=True)
-        data['labels'] = data['labels'] - 1
+        data["labels"] = data["labels"] - 1
         return data
 
 
 class YahooAnswersDataset(ClassificationDataset):
     def __init__(self, data_path, split, reduce=False, load_preprocessed_from_cache=True):
         paths = {
-            'train': Path(data_path) / 'yahoo_answers_csv/train.csv',
-            'val': Path(data_path) / 'yahoo_answers_csv/train.csv',
-            'test': Path(data_path) / 'yahoo_answers_csv/test.csv'
+            "train": Path(data_path) / "yahoo_answers_csv/train.csv",
+            "val": Path(data_path) / "yahoo_answers_csv/train.csv",
+            "test": Path(data_path) / "yahoo_answers_csv/test.csv"
         }
         super().__init__(paths[split], split, n_classes=10, reduce=reduce, load_preprocessed_from_cache=load_preprocessed_from_cache)
 
     def read_data(self, file_path):
-        data = pd.read_csv(file_path, header=None, sep=',',
-                                names=['labels', 'question_title', 'question_content', 'best_answer'],
+        data = pd.read_csv(file_path, header=None, sep=",",
+                                names=["labels", "question_title", "question_content", "best_answer"],
                                 index_col=False)
         data.dropna(inplace=True)
-        data['text'] = data['question_title'] + data['question_content'] + data['best_answer']
-        data['labels'] = data['labels'] - 1
-        data.drop(columns=['question_title', 'question_content', 'best_answer'], inplace=True)
+        data["text"] = data["question_title"] + data["question_content"] + data["best_answer"]
+        data["labels"] = data["labels"] - 1
+        data.drop(columns=["question_title", "question_content", "best_answer"], inplace=True)
         return data
 
 
@@ -249,32 +249,32 @@ def get_dataset(data_path, dataset_id):
     assert 0 <= dataset_id <= 4, "invalid dataset id"
     dataset = DATASET_MAPPING[dataset_id]
     return (
-        dataset(data_path, 'train', reduce=True),
-        dataset(data_path, 'val', reduce=True),
-        dataset(data_path, 'test', reduce=True),
+        dataset(data_path, "train", reduce=True),
+        dataset(data_path, "val", reduce=True),
+        dataset(data_path, "test", reduce=True),
     ) 
     # if dataset_id == 0:
-    #     train_dataset = AGNewsDataset(data_path, 'train', reduce=True)
-    #     val_dataset = AGNewsDataset(data_path, 'val', reduce=True)
-    #     test_dataset = AGNewsDataset(data_path, 'test', reduce=True)
+    #     train_dataset = AGNewsDataset(data_path, "train", reduce=True)
+    #     val_dataset = AGNewsDataset(data_path, "val", reduce=True)
+    #     test_dataset = AGNewsDataset(data_path, "test", reduce=True)
     # elif dataset_id == 1:
-    #     train_dataset = AmazonDataset(data_path, 'train', reduce=True)
-    #     val_dataset = AmazonDataset(data_path, 'val', reduce=True)
-    #     test_dataset = AmazonDataset(data_path, 'test', reduce=True)
+    #     train_dataset = AmazonDataset(data_path, "train", reduce=True)
+    #     val_dataset = AmazonDataset(data_path, "val", reduce=True)
+    #     test_dataset = AmazonDataset(data_path, "test", reduce=True)
     # elif dataset_id == 2:
-    #     train_dataset = YelpDataset(data_path, 'train', reduce=True)
-    #     val_dataset = YelpDataset(data_path, 'val', reduce=True)
-    #     test_dataset = YelpDataset(data_path, 'test', reduce=True)
+    #     train_dataset = YelpDataset(data_path, "train", reduce=True)
+    #     val_dataset = YelpDataset(data_path, "val", reduce=True)
+    #     test_dataset = YelpDataset(data_path, "test", reduce=True)
     # elif dataset_id == 3:
-    #     train_dataset = DBPediaDataset(data_path, 'train', reduce=True)
-    #     val_dataset = DBPediaDataset(data_path, 'val', reduce=True)
-    #     test_dataset = DBPediaDataset(data_path, 'test', reduce=True)
+    #     train_dataset = DBPediaDataset(data_path, "train", reduce=True)
+    #     val_dataset = DBPediaDataset(data_path, "val", reduce=True)
+    #     test_dataset = DBPediaDataset(data_path, "test", reduce=True)
     # elif dataset_id == 4:
-    #     train_dataset = YahooAnswersDataset(data_path, 'train', reduce=True)
-    #     val_dataset = YahooAnswersDataset(data_path, 'val', reduce=True)
-    #     test_dataset = YahooAnswersDataset(data_path, 'test', reduce=True)
+    #     train_dataset = YahooAnswersDataset(data_path, "train", reduce=True)
+    #     val_dataset = YahooAnswersDataset(data_path, "val", reduce=True)
+    #     test_dataset = YahooAnswersDataset(data_path, "test", reduce=True)
     # else:
-    #     raise Exception('Invalid dataset ID')
+    #     raise Exception("Invalid dataset ID")
     # return train_dataset, val_dataset, test_dataset
 
 
@@ -287,7 +287,7 @@ def get_datasets(data_path, data_order):
     train_datasets, val_datasets, test_datasets = [], [], []
     for dataset_id in DATASET_ORDER_MAPPING[data_order]:
         train_dataset, val_dataset, test_dataset = get_dataset(data_path, dataset_id)
-        logging.info('Loaded {}'.format(train_dataset.__class__.__name__))
+        logging.info("Loaded {}".format(train_dataset.__class__.__name__))
         # the same model is used for all tasks, so we need to shift labels of tasks
         train_dataset = offset_labels(train_dataset)
         val_dataset = offset_labels(val_dataset)
@@ -295,11 +295,11 @@ def get_datasets(data_path, data_order):
         train_datasets.append(train_dataset)
         val_datasets.append(val_dataset)
         test_datasets.append(test_dataset)
-    logging.info('Finished loading all the datasets')
+    logging.info("Finished loading all the datasets")
     return {
-        'train': train_datasets,
-        'val': val_datasets,
-        'test': test_datasets,
+        "train": train_datasets,
+        "val": val_datasets,
+        "test": test_datasets,
     }
 
 def offset_labels(dataset):
@@ -312,5 +312,5 @@ def offset_labels(dataset):
         offset_by = 5 + 4
     elif isinstance(dataset, YahooAnswersDataset):
         offset_by = 5 + 4 + 14
-    dataset.data['labels'] = dataset.data['labels'] + offset_by
+    dataset.data["labels"] = dataset.data["labels"] + offset_by
     return dataset

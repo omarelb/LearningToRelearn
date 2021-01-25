@@ -18,7 +18,7 @@ def batch_encode(batch):
 
 
 def remove_return_sym(str):
-    return str.split('\n')[0]
+    return str.split("\n")[0]
 
 def get_max_len(text_list):
     return max([len(x) for x in text_list])

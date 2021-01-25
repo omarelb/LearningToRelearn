@@ -19,7 +19,7 @@ from omegaconf import DictConfig
 
 from MetaLifeLongLanguage.datasets.text_classification_dataset import get_datasets
 
-# plt.style.use('seaborn-paper')
+# plt.style.use("seaborn-paper")
 CHECKPOINTS = Path("model-checkpoints/")
 LOGS = Path("tensorboard-logs/")
 RESULTS = Path("results")
@@ -54,7 +54,7 @@ class Learner:
         # Checkpoint directory to save models        
         self.checkpoint_dir = self.exp_dir / CHECKPOINTS
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        checkpoint_exists = len(list(self.checkpoint_dir.glob('*'))) > 0
+        checkpoint_exists = len(list(self.checkpoint_dir.glob("*"))) > 0
 
         # data directory using original working directory
         self.data_dir = hydra.utils.to_absolute_path("data")
@@ -70,7 +70,7 @@ class Learner:
         self.logger.info("TRAINING LOG")
         self.logger.info("-"*50)
 
-        self.logger.info("-"*50 + '\n' + f'CONFIG:\n{self.config}\n' + "-"*50)
+        self.logger.info("-"*50 + "\n" + f"CONFIG:\n{self.config}\n" + "-"*50)
 
         if checkpoint_exists:
             self.logger.info(f"Checkpoint for {self.exp_dir.name} ALREADY EXISTS. Continuing training.")
@@ -86,7 +86,7 @@ class Learner:
         self.current_iter = 0
         self.current_epoch = 0
         self.best_accuracy = 0.
-        self.best_loss = float('inf')
+        self.best_loss = float("inf")
 
         self.logger.info(f"Using device: {self.config.training.device}")
         # if checkpoint_exists:
@@ -105,7 +105,7 @@ class Learner:
         results = {}
         for dataset in datasets:
             dataset_name = dataset.__class__.__name__
-            logger.info('Testing on {}'.format(dataset_name))
+            logger.info("Testing on {}".format(dataset_name))
             test_dataloader = data.DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False,
                                               collate_fn=batch_encode)
             dataset_results = self.evaluate(dataloader=test_dataloader)
@@ -115,8 +115,8 @@ class Learner:
             f1s.append(results["f1"])
             results[dataset_name] = dataset_results
 
-        logger.info('Overall test metrics: Accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, '
-                    'F1 score = {:.4f}'.format(np.mean(accuracies), np.mean(precisions), np.mean(recalls),
+        logger.info("Overall test metrics: Accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
+                    "F1 score = {:.4f}".format(np.mean(accuracies), np.mean(precisions), np.mean(recalls),
                                                np.mean(f1s)))
         return results
 
@@ -136,12 +136,12 @@ class Learner:
 
         file_name = self.checkpoint_dir / file_name
         state = {
-            'epoch': self.current_epoch,
-            'iter': self.current_iter,
-            'best_accuracy': self.best_accuracy,
-            'best_loss': self.best_loss,
-            'model_state': self.model_state(),
-            'optimizer': self.optimizer_state(),
+            "epoch": self.current_epoch,
+            "iter": self.current_iter,
+            "best_accuracy": self.best_accuracy,
+            "best_loss": self.best_loss,
+            "model_state": self.model_state(),
+            "optimizer": self.optimizer_state(),
         }
         torch.save(state, file_name)
         self.logger.info(f"Checkpoint saved @ {file_name}")
@@ -166,10 +166,10 @@ class Learner:
             self.logger.info(f"Loading checkpoint from {file_name}")
             checkpoint = torch.load(file_name, self.config.training.device)
 
-            self.current_epoch = checkpoint['epoch']
-            self.current_iter = checkpoint['iter']
-            self.best_accuracy = checkpoint['best_accuracy']
-            self.best_loss = checkpoint['best_loss']
+            self.current_epoch = checkpoint["epoch"]
+            self.current_iter = checkpoint["iter"]
+            self.best_accuracy = checkpoint["best_accuracy"]
+            self.best_loss = checkpoint["best_loss"]
             self.load_model_state(checkpoint)
             self.load_optimizer_state(checkpoint)
 
@@ -183,10 +183,10 @@ class Learner:
         return self.optimizer.state_dict()
 
     def load_model_state(self, checkpoint):
-        self.model.load_state_dict(checkpoint['model_state'])
+        self.model.load_state_dict(checkpoint["model_state"])
 
     def load_optimizer_state(self, checkpoint):
-        self.optimizer.load_state_dict(checkpoint['optimizer'])
+        self.optimizer.load_state_dict(checkpoint["optimizer"])
         
     def get_datasets(self, data_dir, order):
         return get_datasets(data_dir, order)
@@ -194,15 +194,15 @@ class Learner:
 
 def get_last_checkpoint_path(checkpoint_dir):
     """Return path of the latest checkpoint in a given checkpoint directory."""
-    paths = list(checkpoint_dir.glob('Epoch*'))
+    paths = list(checkpoint_dir.glob("Epoch*"))
     if len(paths) > 0:
         # parse epochs and steps from path names
         epochs = []
         steps = []
         for path in paths:
-            epoch, step = path.stem.split('-')
-            epoch = int(epoch.split('[')[-1][:-1])
-            step = int(step.split('[')[-1][:-1])
+            epoch, step = path.stem.split("-")
+            epoch = int(epoch.split("[")[-1][:-1])
+            step = int(step.split("[")[-1][:-1])
             epochs.append(epoch)
             steps.append(step)
         # sort first by epoch, then by step
