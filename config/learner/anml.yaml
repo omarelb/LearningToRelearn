@@ -1,2 +1,3 @@
 # @package _group_
 type: anml
+model_name: bert

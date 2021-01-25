@@ -1,5 +1,4 @@
 # @package _group_
-_target_: MetaLifeLongLanguage.models.cls_baseline.Baseline
 type: multitask # multitask learning
 lr: 0.00003 # learning rate
 model_name: bert

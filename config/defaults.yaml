@@ -11,9 +11,11 @@ write_prob: 1.0 # Write probability for buffer memory
 replay_rate: 0.01 # replay rate from memory
 replay_every: 9600 # Number of data points between replay
 updates: 5 # number of inner loop updates
+clip_grad_norm: 25 # gradient norm clipping (for replay learner)
+wandb: true # whether to use weights and biases for logging
 
 hydra:
   run:
-    dir: experiments/${now:%Y-%m-%d_%H-%M-%S}_${hydra.job.override_dirname}
+    dir: experiments/${hydra.job.override_dirname}_${now:%Y-%m-%d_%H-%M-%S}
   sweep:
-    subdir: ${hydra.job.num}_${hydra.job.override_dirname}
+    subdir: ${hydra.job.override_dirname}_${hydra.job.num}

@@ -48,13 +48,8 @@ class MAML(Learner):
 
     def training(self, datasets, **kwargs):
         train_datasets = datasets["train"]
-        if self.replay_rate != 0:
-            replay_batch_freq = self.replay_every // self.mini_batch_size
-            replay_freq = int(math.ceil((replay_batch_freq + 1) / (self.config.updates + 1)))
-            replay_steps = int(self.replay_every * self.replay_rate / self.mini_batch_size)
-        else:
-            replay_freq = 0
-            replay_steps = 0
+
+        replay_freq, replay_steps = self.replay_parameters()
         self.logger.info("Replay frequency: {}".format(replay_freq))
         self.logger.info("Replay steps: {}".format(replay_steps))
 

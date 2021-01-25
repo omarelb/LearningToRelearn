@@ -21,18 +21,20 @@ logger = logging.getLogger("OML-Log")
 
 class OML(Learner):
 
-    def __init__(self, device, n_classes, **kwargs):
-        self.inner_lr = kwargs.get("inner_lr")
-        self.meta_lr = kwargs.get("meta_lr")
-        self.write_prob = kwargs.get("write_prob")
-        self.replay_rate = kwargs.get("replay_rate")
-        self.replay_every = kwargs.get("replay_every")
-        self.device = device
+    def __init__(self, config):
+        super().__init__(config)
+        self.inner_lr = config.training.inner_lr
+        self.meta_lr = config.training.meta_lr
+        self.write_prob = config.write_prob
+        self.replay_rate = config.replay_rate
+        self.replay_every = config.replay_every
+        self.device = config.training.device
+        self.mini_batch_size = config.training.batch_size
 
-        self.rln = TransformerRLN(model_name=kwargs.get("model"),
-                                  max_length=kwargs.get("max_length"),
-                                  device=device)
-        self.pln = LinearPLN(in_dim=768, out_dim=n_classes, device=device)
+        self.rln = TransformerRLN(model_name=config.learner.model_name,
+                                  max_length=config.data.max_length,
+                                  device=self.device)
+        self.pln = LinearPLN(in_dim=768, out_dim=config.data.n_classes, device=self.device)
         self.memory = ReplayMemory(write_prob=self.write_prob, tuple_size=2)
         self.loss_fn = nn.CrossEntropyLoss()
 
@@ -46,24 +48,14 @@ class OML(Learner):
         inner_params = [p for p in self.pln.parameters() if p.requires_grad]
         self.inner_optimizer = optim.SGD(inner_params, lr=self.inner_lr)
 
-    def save_model(self, model_path):
-        checkpoint = {"rln": self.rln.state_dict(),
-                      "pln": self.pln.state_dict()}
-        torch.save(checkpoint, model_path)
 
-    def load_model(self, model_path):
-        checkpoint = torch.load(model_path)
-        self.rln.load_state_dict(checkpoint["rln"])
-        self.pln.load_state_dict(checkpoint["pln"])
-
-    def evaluate(self, dataloader, updates, mini_batch_size):
-
+    def evaluate(self, dataloader):
         self.rln.eval()
         self.pln.train()
 
         support_set = []
         for _ in range(updates):
-            text, labels = self.memory.read_batch(batch_size=mini_batch_size)
+            text, labels = self.memory.read_batch(batch_size=self.mini_batch_size)
             support_set.append((text, labels))
 
         with higher.innerloop_ctx(self.pln, self.inner_optimizer,
@@ -111,27 +103,18 @@ class OML(Learner):
 
         return {"accuracy": acc, "precision": prec, "recall": rec, "f1": f1}
 
-    def training(self, train_datasets, **kwargs):
-        updates = kwargs.get("updates")
-        mini_batch_size = kwargs.get("mini_batch_size")
+    def training(self, datasets, **kwargs):
+        train_datasets = datasets["train"]
 
-        if self.replay_rate != 0:
-            replay_batch_freq = self.replay_every // mini_batch_size
-            replay_freq = int(math.ceil((replay_batch_freq + 1) / (updates + 1)))
-            replay_steps = int(self.replay_every * self.replay_rate / mini_batch_size)
-        else:
-            replay_freq = 0
-            replay_steps = 0
+        replay_freq, replay_steps = self.replay_parameters()
         logger.info("Replay frequency: {}".format(replay_freq))
         logger.info("Replay steps: {}".format(replay_steps))
 
         concat_dataset = data.ConcatDataset(train_datasets)
-        train_dataloader = iter(data.DataLoader(concat_dataset, batch_size=mini_batch_size, shuffle=False,
+        train_dataloader = iter(data.DataLoader(concat_dataset, batch_size=self.mini_batch_size, shuffle=False,
                                                 collate_fn=dataset_utils.batch_encode))
 
-        episode_id = 0
         while True:
-
             self.inner_optimizer.zero_grad()
             support_loss, support_acc, support_prec, support_rec, support_f1 = [], [], [], [], []
 
@@ -166,16 +149,21 @@ class OML(Learner):
                 acc, prec, rec, f1 = model_utils.calculate_metrics(task_predictions, task_labels)
 
                 logger.info("Episode {} support set: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, "
-                            "recall = {:.4f}, F1 score = {:.4f}".format(episode_id + 1,
+                            "recall = {:.4f}, F1 score = {:.4f}".format(self.current_iter + 1,
                                                                         np.mean(support_loss), acc, prec, rec, f1))
+                self.writer.add_scalar("Train/Support/Accuracy", acc, self.current_iter)
+                self.writer.add_scalar("Train/Support/Precision", prec, self.current_iter)
+                self.writer.add_scalar("Train/Support/Recall", rec, self.current_iter)
+                self.writer.add_scalar("Train/Support/F1-Score", f1, self.current_iter)
+                self.writer.add_scalar("Train/Support/Loss", np.mean(support_loss), self.current_iter)
 
                 # Outer loop
                 query_loss, query_acc, query_prec, query_rec, query_f1 = [], [], [], [], []
                 query_set = []
 
-                if self.replay_rate != 0 and (episode_id + 1) % replay_freq == 0:
+                if self.replay_rate != 0 and (self.current_iter + 1) % replay_freq == 0:
                     for _ in range(replay_steps):
-                        text, labels = self.memory.read_batch(batch_size=mini_batch_size)
+                        text, labels = self.memory.read_batch(batch_size=self.mini_batch_size)
                         query_set.append((text, labels))
                 else:
                     try:
@@ -225,9 +213,27 @@ class OML(Learner):
                 self.meta_optimizer.zero_grad()
 
                 logger.info("Episode {} query set: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, "
-                            "recall = {:.4f}, F1 score = {:.4f}".format(episode_id + 1,
+                            "recall = {:.4f}, F1 score = {:.4f}".format(self.current_iter + 1,
                                                                         np.mean(query_loss), np.mean(query_acc),
                                                                         np.mean(query_prec), np.mean(query_rec),
                                                                         np.mean(query_f1)))
+                self.writer.add_scalar("Train/Query/Accuracy", np.mean(query_acc), self.current_iter)
+                self.writer.add_scalar("Train/Query/Precision", np.mean(query_prec), self.current_iter)
+                self.writer.add_scalar("Train/Query/Recall", np.mean(query_rec), self.current_iter)
+                self.writer.add_scalar("Train/Query/F1-Score", np.mean(query_f1), self.current_iter)
+                self.writer.add_scalar("Train/Query/Loss", np.mean(query_loss), self.current_iter)
+                self.current_iter += 1
 
-                episode_id += 1
+    def model_state(self):
+        return {"rln": self.rln.state_dict(),
+                "pln": self.pln.state_dict()}
+
+    def optimizer_state(self):
+        return self.meta_optimizer.state_dict()
+
+    def load_model_state(self, checkpoint):
+        self.rln.load_state_dict(checkpoint["model_state"]["rln"])
+        self.pln.load_state_dict(checkpoint["model_state"]["pln"])
+
+    def load_optimizer_state(self, checkpoint):
+        self.meta_optimizer.load_state_dict(checkpoint["optimizer"])

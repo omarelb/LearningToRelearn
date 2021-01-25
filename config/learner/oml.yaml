@@ -1,2 +1,3 @@
 # @package _group_
 type: oml
+model_name: bert

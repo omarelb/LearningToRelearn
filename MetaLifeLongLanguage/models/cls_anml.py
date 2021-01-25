@@ -50,13 +50,7 @@ class ANML(Learner):
         self.inner_optimizer = optim.SGD(inner_params, lr=self.inner_lr)
 
     def training(self, datasets, **kwargs):
-        if self.replay_rate != 0:
-            replay_batch_freq = self.replay_every // self.mini_batch_size
-            replay_freq = int(math.ceil((replay_batch_freq + 1) / (self.config.updates + 1)))
-            replay_steps = int(self.replay_every * self.replay_rate / self.mini_batch_size)
-        else:
-            replay_freq = 0
-            replay_steps = 0
+        replay_freq, replay_steps = self.replay_parameters()
         logger.info("Replay frequency: {}".format(replay_freq))
         logger.info("Replay steps: {}".format(replay_steps))
 
@@ -175,7 +169,7 @@ class ANML(Learner):
 
                 self.current_iter += 1
 
-    def evaluate(self, dataloader, updates, mini_batch_size):
+    def evaluate(self, dataloader):
         support_set = []
         for _ in range(updates):
             text, labels = self.memory.read_batch(batch_size=mini_batch_size)

@@ -6,6 +6,7 @@ import numpy as np
 
 from torch.utils import data
 from transformers import AdamW
+import wandb
 
 import MetaLifeLongLanguage.datasets.utils as dataset_utils
 import MetaLifeLongLanguage.models.utils as model_utils
@@ -51,7 +52,6 @@ class AGEM(Learner):
         dataloader = dataloaders["train"]
 
         for epoch in range(self.n_epochs):
-            epoch_iteration = 0
             all_losses, all_predictions, all_labels = [], [], []
 
             for text, labels in dataloader:
@@ -60,7 +60,7 @@ class AGEM(Learner):
                 output = self.model(input_dict)
                 loss = self.loss_fn(output, labels)
 
-                self.update_parameters(loss, mini_batch_size=len(labels), epoch_iteration=epoch_iteration)
+                self.update_parameters(loss, mini_batch_size=len(labels))
 
                 loss = loss.item()
                 pred = model_utils.make_prediction(output.detach())
@@ -71,14 +71,14 @@ class AGEM(Learner):
                 self.memory.write_batch(text, labels)
 
                 if self.current_iter % self.log_freq == 0:
-                    self.write_log(all_predictions, all_labels, all_losses)
+                    self.write_log(all_predictions, all_labels, all_losses, data_length=len(dataloader))
                     all_losses, all_predictions, all_labels = [], [], []
                 if self.current_iter % self.config.training.save_freq == 0:
                     self.save_checkpoint()
-                epoch_iteration += 1
+                self.current_iter += 1
             self.current_epoch += 1
 
-    def update_parameters(self, loss, mini_batch_size, epoch_iteration):
+    def update_parameters(self, loss, mini_batch_size):
         """Update parameters of model"""
         self.optimizer.zero_grad()
 
@@ -88,7 +88,7 @@ class AGEM(Learner):
         replay_freq = self.replay_every // mini_batch_size
         replay_steps = int(self.replay_every * self.replay_rate / mini_batch_size)
 
-        if self.replay_rate != 0 and (epoch_iteration + 1) % replay_freq == 0:
+        if self.replay_rate != 0 and (self.current_iter + 1) % replay_freq == 0:
             ref_grad_sum = None
             for _ in range(replay_steps):
                 ref_text, ref_labels = self.memory.read_batch(batch_size=mini_batch_size)
@@ -109,16 +109,26 @@ class AGEM(Learner):
             param.grad = grad.data
         self.optimizer.step()
 
-    def write_log(self, all_predictions, all_labels, all_losses):
+    def write_log(self, all_predictions, all_labels, all_losses, data_length):
         acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
         self.logger.info(
-            "Iteration {} metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
-            "F1 score = {:.4f}".format(self.current_iter + 1, np.mean(all_losses), acc, prec, rec, f1))
+            "Iteration {}/{} ({}%) metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
+            "F1 score = {:.4f}".format(self.current_iter + 1, data_length, (self.current_iter + 1) / data_length * 100,
+                                       np.mean(all_losses), acc, prec, rec, f1))
         self.writer.add_scalar("Train/Accuracy", acc, self.current_iter)
         self.writer.add_scalar("Train/Precision", prec, self.current_iter)
         self.writer.add_scalar("Train/Recall", rec, self.current_iter)
         self.writer.add_scalar("Train/F1-Score", f1, self.current_iter)
         self.writer.add_scalar("Train/Loss", np.mean(all_losses), self.current_iter)
+        if self.config.wandb:
+            wandb.log({
+                "accuracy": acc,
+                "precision": prec,
+                "recall": rec,
+                "f1": f1,
+                "loss": np.mean(all_losses)
+            })
+
 
     def evaluate(self, dataloader):
         all_losses, all_predictions, all_labels = [], [], []
@@ -140,6 +150,7 @@ class AGEM(Learner):
         acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
         logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
                     "F1 score = {:.4f}".format(np.mean(all_losses), acc, prec, rec, f1))
+        wandb.log({"test_accuracy": acc, "test_precision": prec, "test_recall": rec, "test_f1": f1})
 
         return {"accuracy": acc, "precision": prec, "recall": rec, "f1": f1}
 

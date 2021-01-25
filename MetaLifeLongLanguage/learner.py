@@ -5,6 +5,7 @@ from typing import Tuple
 from pathlib import Path
 import time
 import random
+import math
 
 import torch
 import numpy as np
@@ -16,6 +17,7 @@ from sklearn import metrics
 import matplotlib.pyplot as plt
 import hydra
 from omegaconf import DictConfig
+import wandb
 
 from MetaLifeLongLanguage.datasets.text_classification_dataset import get_datasets
 
@@ -45,6 +47,10 @@ class Learner:
             dict of parameters that drive the training behaviour.
         """
         self.config = config
+
+        # weights and biases
+        if config.wandb:
+            wandb.init(project="relearning")
 
         experiment_path = os.getcwd() # hydra changes the runtime to the experiment folder
         # Experiment output directory
@@ -88,7 +94,9 @@ class Learner:
         self.best_accuracy = 0.
         self.best_loss = float("inf")
 
+        self.device = config.training.device
         self.logger.info(f"Using device: {self.config.training.device}")
+
         # if checkpoint_exists:
         #     last_checkpoint = get_last_checkpoint_path(self.checkpoint_dir)
         #     self.logger.info(f"Loading model checkpoint from {last_checkpoint}")
@@ -119,6 +127,16 @@ class Learner:
                     "F1 score = {:.4f}".format(np.mean(accuracies), np.mean(precisions), np.mean(recalls),
                                                np.mean(f1s)))
         return results
+
+    def replay_parameters(self):
+        if self.replay_rate != 0:
+            replay_batch_freq = self.replay_every // self.mini_batch_size
+            replay_freq = int(math.ceil((replay_batch_freq + 1) / (self.config.updates + 1)))
+            replay_steps = int(self.replay_every * self.replay_rate / self.mini_batch_size)
+        else:
+            replay_freq = 0
+            replay_steps = 0
+        return replay_freq, replay_steps
 
 
     def save_checkpoint(self, file_name: str = None):
