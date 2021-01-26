@@ -517,4 +517,5 @@ TSWLatexianTemp*
 data/
 experiments/
 *.pt
+*.out
 jobs/

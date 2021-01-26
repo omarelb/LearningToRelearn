@@ -48,15 +48,21 @@ class Learner:
             dict of parameters that drive the training behaviour.
         """
         self.config = config
+        self.logger = logging.getLogger(__name__)
 
         # weights and biases
         if config.wandb:
-            wandb.init(project="relearning", config=flatten_dict(config))
+            while True:
+                try:
+                    wandb.init(project="relearning", config=flatten_dict(config))
+                    break
+                except:
+                    self.logger.info("wandb initialization failed. Retrying..")
+                    time.sleep(10)
 
         experiment_path = os.getcwd() # hydra changes the runtime to the experiment folder
         # Experiment output directory
         self.exp_dir = Path(experiment_path)
-        self.logger = logging.getLogger(__name__)
 
         # Checkpoint directory to save models        
         self.checkpoint_dir = self.exp_dir / CHECKPOINTS

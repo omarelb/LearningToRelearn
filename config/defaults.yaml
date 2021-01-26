@@ -22,4 +22,5 @@ hydra:
   run:
     dir: experiments/${hydra.job.override_dirname}_${now:%Y-%m-%d_%H-%M-%S}
   sweep:
+    dir: experiments/${now:%Y-%m-%d}/${now:%H-%M-%S}
     subdir: ${hydra.job.override_dirname}_${hydra.job.num}
