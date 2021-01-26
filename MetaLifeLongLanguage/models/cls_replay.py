@@ -21,8 +21,8 @@ class Replay(Learner):
     def __init__(self, config):
         super().__init__(config)
 
-        self.inner_lr = config.training.inner_lr
-        self.meta_lr = config.training.meta_lr
+        self.inner_lr = config.learner.inner_lr
+        self.meta_lr = config.learner.meta_lr
         self.write_prob = config.write_prob
         self.replay_rate = config.replay_rate
         self.replay_every = config.replay_every

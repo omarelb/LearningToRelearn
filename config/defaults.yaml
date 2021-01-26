@@ -1,9 +1,11 @@
 defaults:
   - training: on_gpu
   - model: bert
-  - data: classification
-  - learner: oml
+  - learner: agem
 
+learner:
+  inner_lr: 1e-3
+  meta_lr: 1e-5
 seed: 42 # random seed
 inference: false
 version: 0
