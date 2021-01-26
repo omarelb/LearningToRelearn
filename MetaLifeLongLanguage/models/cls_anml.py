@@ -1,9 +1,11 @@
 import logging
 import math
+import time
 
 import higher
 import torch
 from torch import nn, optim
+import wandb
 
 import numpy as np
 
@@ -27,7 +29,6 @@ class ANML(Learner):
         self.write_prob = config.write_prob
         self.replay_rate = config.replay_rate
         self.replay_every = config.replay_every
-        self.device = config.training.device
         self.mini_batch_size = config.training.batch_size
 
         self.nm = TransformerNeuromodulator(model_name=config.learner.model_name,
@@ -53,10 +54,12 @@ class ANML(Learner):
         replay_freq, replay_steps = self.replay_parameters()
         logger.info("Replay frequency: {}".format(replay_freq))
         logger.info("Replay steps: {}".format(replay_steps))
+        examples_seen = 0
 
         concat_dataset = data.ConcatDataset(datasets["train"])
         train_dataloader = iter(data.DataLoader(concat_dataset, batch_size=self.mini_batch_size, shuffle=False,
                                                 collate_fn=dataset_utils.batch_encode))
+        n_episodes = len(train_dataloader) // self.config.updates
         while True:
             self.inner_optimizer.zero_grad()
             support_loss, support_acc, support_prec, support_rec, support_f1 = [], [], [], [], []
@@ -71,6 +74,7 @@ class ANML(Learner):
                     try:
                         text, labels = next(train_dataloader)
                         support_set.append((text, labels))
+                        examples_seen += self.mini_batch_size
                     except StopIteration:
                         logger.info("Terminating training as all the data is seen")
                         return
@@ -91,14 +95,23 @@ class ANML(Learner):
 
                 acc, prec, rec, f1 = model_utils.calculate_metrics(task_predictions, task_labels)
 
-                self.logger.info("Episode {} support set: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, "
-                            "recall = {:.4f}, F1 score = {:.4f}".format(self.current_iter + 1,
+                self.logger.info("Episode {}/{} ({:.2f}%) support set: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, "
+                            "recall = {:.4f}, F1 score = {:.4f}".format(self.current_iter + 1, n_episodes, (self.current_iter + 1) / n_episodes,
                                                                         np.mean(support_loss), acc, prec, rec, f1))
                 self.writer.add_scalar("Train/Support/Accuracy", acc, self.current_iter)
                 self.writer.add_scalar("Train/Support/Precision", prec, self.current_iter)
                 self.writer.add_scalar("Train/Support/Recall", rec, self.current_iter)
                 self.writer.add_scalar("Train/Support/F1-Score", f1, self.current_iter)
                 self.writer.add_scalar("Train/Support/Loss", np.mean(support_loss), self.current_iter)
+                if self.config.wandb:
+                    wandb.log({
+                        "support_accuracy": acc,
+                        "support_precision": prec,
+                        "support_recall": rec,
+                        "support_f1": f1,
+                        "support_loss": np.mean(support_loss),
+                        "examples_seen": examples_seen
+                    })
 
                 # Outer loop
                 query_loss, query_acc, query_prec, query_rec, query_f1 = [], [], [], [], []
@@ -113,6 +126,7 @@ class ANML(Learner):
                         text, labels = next(train_dataloader)
                         query_set.append((text, labels))
                         self.memory.write_batch(text, labels)
+                        examples_seen += self.mini_batch_size
                     except StopIteration:
                         logger.info("Terminating training as all the data is seen")
                         return
@@ -156,7 +170,7 @@ class ANML(Learner):
                 self.meta_optimizer.step()
                 self.meta_optimizer.zero_grad()
 
-                logger.info("Episode {} query set: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, "
+                self.logger.info("Episode {} query set: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, "
                             "recall = {:.4f}, F1 score = {:.4f}".format(self.current_iter + 1,
                                                                         np.mean(query_loss), np.mean(query_acc),
                                                                         np.mean(query_prec), np.mean(query_rec),
@@ -166,6 +180,15 @@ class ANML(Learner):
                 self.writer.add_scalar("Train/Query/Recall", np.mean(query_rec), self.current_iter)
                 self.writer.add_scalar("Train/Query/F1-Score", np.mean(query_f1), self.current_iter)
                 self.writer.add_scalar("Train/Query/Loss", np.mean(query_loss), self.current_iter)
+                if self.config.wandb:
+                    wandb.log({
+                        "query_accuracy": np.mean(query_acc),
+                        "query_precision": np.mean(query_prec),
+                        "query_recall": np.mean(query_rec),
+                        "query_f1": np.mean(query_f1),
+                        "query_loss": np.mean(query_loss),
+                        "examples_seen": examples_seen
+                    })
 
                 self.current_iter += 1
 
@@ -196,7 +219,7 @@ class ANML(Learner):
 
             acc, prec, rec, f1 = model_utils.calculate_metrics(task_predictions, task_labels)
 
-            logger.info("Support set metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, "
+            self.logger.info("Support set metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, "
                         "recall = {:.4f}, F1 score = {:.4f}".format(np.mean(support_loss), acc, prec, rec, f1))
 
             all_losses, all_predictions, all_labels = [], [], []
@@ -216,7 +239,7 @@ class ANML(Learner):
                 all_labels.extend(labels.tolist())
 
         acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
-        logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
+        self.logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
                     "F1 score = {:.4f}".format(np.mean(all_losses), acc, prec, rec, f1))
 
         return {"accuracy": acc, "precision": prec, "recall": rec, "f1": f1}

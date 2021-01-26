@@ -1,0 +1,154 @@
+hydra:
+  run:
+    dir: experiments/${hydra.job.override_dirname}_${now:%Y-%m-%d_%H-%M-%S}
+  sweep:
+    dir: multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.override_dirname}_${hydra.job.num}
+  hydra_logging:
+    version: 1
+    formatters:
+      simple:
+        format: '[%(asctime)s][HYDRA] %(message)s'
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: simple
+        stream: ext://sys.stdout
+    root:
+      level: INFO
+      handlers:
+      - console
+    loggers:
+      logging_example:
+        level: DEBUG
+    disable_existing_loggers: false
+  job_logging:
+    version: 1
+    formatters:
+      simple:
+        format: '[%(asctime)s][%(name)s][%(levelname)s] - %(message)s'
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: simple
+        stream: ext://sys.stdout
+      file:
+        class: logging.FileHandler
+        formatter: simple
+        filename: ${hydra.job.name}.log
+    root:
+      level: INFO
+      handlers:
+      - console
+      - file
+    disable_existing_loggers: false
+  sweeper:
+    _target_: hydra._internal.core_plugins.basic_sweeper.BasicSweeper
+    max_batch_size: null
+  launcher:
+    _target_: hydra._internal.core_plugins.basic_launcher.BasicLauncher
+  help:
+    app_name: ${hydra.job.name}
+    header: '${hydra.help.app_name} is powered by Hydra.
+
+      '
+    footer: 'Powered by Hydra (https://hydra.cc)
+
+      Use --hydra-help to view Hydra specific help
+
+      '
+    template: '${hydra.help.header}
+
+      == Configuration groups ==
+
+      Compose your configuration from those groups (group=option)
+
+
+      $APP_CONFIG_GROUPS
+
+
+      == Config ==
+
+      Override anything in the config (foo.bar=value)
+
+
+      $CONFIG
+
+
+      ${hydra.help.footer}
+
+      '
+  hydra_help:
+    hydra_help: ???
+    template: 'Hydra (${hydra.runtime.version})
+
+      See https://hydra.cc for more info.
+
+
+      == Flags ==
+
+      $FLAGS_HELP
+
+
+      == Configuration groups ==
+
+      Compose your configuration from those groups (For example, append hydra/job_logging=disabled
+      to command line)
+
+
+      $HYDRA_CONFIG_GROUPS
+
+
+      Use ''--cfg hydra'' to Show the Hydra config.
+
+      '
+  output_subdir: .hydra
+  overrides:
+    hydra: []
+    task:
+    - data.order=1,2
+  job:
+    name: train_text_cls
+    override_dirname: data.order=1,2
+    id: ???
+    num: ???
+    config_name: defaults.yaml
+    env_set: {}
+    env_copy: []
+    config:
+      override_dirname:
+        kv_sep: '='
+        item_sep: ','
+        exclude_keys: []
+  runtime:
+    version: 1.0.5
+    cwd: /home/omarelb/projects/thesis/code
+  verbose: false
+learner:
+  inner_lr: 0.001
+  meta_lr: 1.0e-05
+  type: agem
+  model_name: bert
+  lr: 3.0e-05
+seed: 42
+inference: false
+version: 0
+write_prob: 1.0
+replay_rate: 0.01
+replay_every: 9600
+updates: 5
+clip_grad_norm: 25
+wandb: true
+data:
+  order: 1
+  max_length: 448
+  n_classes: 33
+training:
+  device: cuda
+  epochs: 1
+  valid_freq: 100
+  save_freq: 5000
+  log_freq: 50
+  batch_size: 16
+model:
+  name: bert

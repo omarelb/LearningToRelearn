@@ -6,6 +6,7 @@ from pathlib import Path
 import time
 import random
 import math
+import collections
 
 import torch
 import numpy as np
@@ -50,7 +51,7 @@ class Learner:
 
         # weights and biases
         if config.wandb:
-            wandb.init(project="relearning")
+            wandb.init(project="relearning", config=flatten_dict(config))
 
         experiment_path = os.getcwd() # hydra changes the runtime to the experiment folder
         # Experiment output directory
@@ -71,7 +72,8 @@ class Learner:
         self.writer = SummaryWriter(log_dir=self.log_dir)
 
         self.results_dir = self.exp_dir / RESULTS
-
+        if config.debug:
+            self.logger.setLevel(logging.DEBUG)
         self.logger.info("-"*50)
         self.logger.info("TRAINING LOG")
         self.logger.info("-"*50)
@@ -96,7 +98,9 @@ class Learner:
 
         self.device = config.training.device
         self.logger.info(f"Using device: {self.config.training.device}")
+        self.mini_batch_size = config.training.batch_size
 
+        self.start_time = time.time()
         # if checkpoint_exists:
         #     last_checkpoint = get_last_checkpoint_path(self.checkpoint_dir)
         #     self.logger.info(f"Loading model checkpoint from {last_checkpoint}")
@@ -209,6 +213,12 @@ class Learner:
     def get_datasets(self, data_dir, order):
         return get_datasets(data_dir, order)
 
+    def time_metrics(self, data_length):
+        time_elapsed = time.time() - self.start_time
+        time_per_iteration = time_elapsed / self.log_freq # seconds per iteration
+        estimated_time_left = time.strftime('%H:%M:%S', time.gmtime(time_per_iteration * (data_length - (self.current_iter + 1))))
+        return time_per_iteration, estimated_time_left
+
 
 def get_last_checkpoint_path(checkpoint_dir):
     """Return path of the latest checkpoint in a given checkpoint directory."""
@@ -226,3 +236,14 @@ def get_last_checkpoint_path(checkpoint_dir):
         # sort first by epoch, then by step
         last_model_ix = np.lexsort((steps, epochs))[-1]
         return paths[last_model_ix]
+
+
+def flatten_dict(d, parent_key='', sep='_'):
+    items = []
+    for k, v in d.items():
+        new_key = parent_key + sep + k if parent_key else k
+        if isinstance(v, collections.MutableMapping):
+            items.extend(flatten_dict(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)

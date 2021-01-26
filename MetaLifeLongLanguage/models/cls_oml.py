@@ -1,9 +1,11 @@
 import logging
 import math
+import time
 
 import higher
 import torch
 from torch import nn, optim
+import wandb
 
 import numpy as np
 
@@ -28,8 +30,6 @@ class OML(Learner):
         self.write_prob = config.write_prob
         self.replay_rate = config.replay_rate
         self.replay_every = config.replay_every
-        self.device = config.training.device
-        self.mini_batch_size = config.training.batch_size
 
         self.rln = TransformerRLN(model_name=config.learner.model_name,
                                   max_length=config.data.max_length,
@@ -49,62 +49,10 @@ class OML(Learner):
         self.inner_optimizer = optim.SGD(inner_params, lr=self.inner_lr)
 
 
-    def evaluate(self, dataloader):
-        self.rln.eval()
-        self.pln.train()
-
-        support_set = []
-        for _ in range(updates):
-            text, labels = self.memory.read_batch(batch_size=self.mini_batch_size)
-            support_set.append((text, labels))
-
-        with higher.innerloop_ctx(self.pln, self.inner_optimizer,
-                                  copy_initial_weights=False,
-                                  track_higher_grads=False) as (fpln, diffopt):
-
-            # Inner loop
-            task_predictions, task_labels = [], []
-            support_loss = []
-            for text, labels in support_set:
-                labels = torch.tensor(labels).to(self.device)
-                input_dict = self.rln.encode_text(text)
-                repr = self.rln(input_dict)
-                output = fpln(repr)
-                loss = self.loss_fn(output, labels)
-                diffopt.step(loss)
-                pred = model_utils.make_prediction(output.detach())
-                support_loss.append(loss.item())
-                task_predictions.extend(pred.tolist())
-                task_labels.extend(labels.tolist())
-
-            acc, prec, rec, f1 = model_utils.calculate_metrics(task_predictions, task_labels)
-
-            logger.info("Support set metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, "
-                        "recall = {:.4f}, F1 score = {:.4f}".format(np.mean(support_loss), acc, prec, rec, f1))
-
-            all_losses, all_predictions, all_labels = [], [], []
-
-            for text, labels in dataloader:
-                labels = torch.tensor(labels).to(self.device)
-                input_dict = self.rln.encode_text(text)
-                with torch.no_grad():
-                    repr = self.rln(input_dict)
-                    output = fpln(repr)
-                    loss = self.loss_fn(output, labels)
-                loss = loss.item()
-                pred = model_utils.make_prediction(output.detach())
-                all_losses.append(loss)
-                all_predictions.extend(pred.tolist())
-                all_labels.extend(labels.tolist())
-
-        acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
-        logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
-                    "F1 score = {:.4f}".format(np.mean(all_losses), acc, prec, rec, f1))
-
-        return {"accuracy": acc, "precision": prec, "recall": rec, "f1": f1}
 
     def training(self, datasets, **kwargs):
         train_datasets = datasets["train"]
+        examples_seen = 0
 
         replay_freq, replay_steps = self.replay_parameters()
         logger.info("Replay frequency: {}".format(replay_freq))
@@ -125,10 +73,11 @@ class OML(Learner):
                 # Inner loop
                 support_set = []
                 task_predictions, task_labels = [], []
-                for _ in range(updates):
+                for _ in range(self.config.updates):
                     try:
                         text, labels = next(train_dataloader)
                         support_set.append((text, labels))
+                        examples_seen += self.mini_batch_size
                     except StopIteration:
                         logger.info("Terminating training as all the data is seen")
                         return
@@ -156,6 +105,15 @@ class OML(Learner):
                 self.writer.add_scalar("Train/Support/Recall", rec, self.current_iter)
                 self.writer.add_scalar("Train/Support/F1-Score", f1, self.current_iter)
                 self.writer.add_scalar("Train/Support/Loss", np.mean(support_loss), self.current_iter)
+                if self.config.wandb:
+                    wandb.log({
+                        "support_accuracy": acc,
+                        "support_precision": prec,
+                        "support_recall": rec,
+                        "support_f1": f1,
+                        "support_loss": np.mean(support_loss),
+                        "examples_seen": examples_seen
+                    })
 
                 # Outer loop
                 query_loss, query_acc, query_prec, query_rec, query_f1 = [], [], [], [], []
@@ -170,6 +128,7 @@ class OML(Learner):
                         text, labels = next(train_dataloader)
                         query_set.append((text, labels))
                         self.memory.write_batch(text, labels)
+                        examples_seen += self.mini_batch_size
                     except StopIteration:
                         logger.info("Terminating training as all the data is seen")
                         return
@@ -222,7 +181,70 @@ class OML(Learner):
                 self.writer.add_scalar("Train/Query/Recall", np.mean(query_rec), self.current_iter)
                 self.writer.add_scalar("Train/Query/F1-Score", np.mean(query_f1), self.current_iter)
                 self.writer.add_scalar("Train/Query/Loss", np.mean(query_loss), self.current_iter)
+                if self.config.wandb:
+                    wandb.log({
+                        "query_accuracy": np.mean(query_acc),
+                        "query_precision": np.mean(query_prec),
+                        "query_recall": np.mean(query_rec),
+                        "query_f1": np.mean(query_f1),
+                        "query_loss": np.mean(query_loss),
+                        "examples_seen": examples_seen
+                    })
                 self.current_iter += 1
+
+    def evaluate(self, dataloader):
+        self.rln.eval()
+        self.pln.train()
+
+        support_set = []
+        for _ in range(self.config.updates):
+            text, labels = self.memory.read_batch(batch_size=self.mini_batch_size)
+            support_set.append((text, labels))
+
+        with higher.innerloop_ctx(self.pln, self.inner_optimizer,
+                                  copy_initial_weights=False,
+                                  track_higher_grads=False) as (fpln, diffopt):
+
+            # Inner loop
+            task_predictions, task_labels = [], []
+            support_loss = []
+            for text, labels in support_set:
+                labels = torch.tensor(labels).to(self.device)
+                input_dict = self.rln.encode_text(text)
+                repr = self.rln(input_dict)
+                output = fpln(repr)
+                loss = self.loss_fn(output, labels)
+                diffopt.step(loss)
+                pred = model_utils.make_prediction(output.detach())
+                support_loss.append(loss.item())
+                task_predictions.extend(pred.tolist())
+                task_labels.extend(labels.tolist())
+
+            acc, prec, rec, f1 = model_utils.calculate_metrics(task_predictions, task_labels)
+
+            logger.info("Support set metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, "
+                        "recall = {:.4f}, F1 score = {:.4f}".format(np.mean(support_loss), acc, prec, rec, f1))
+
+            all_losses, all_predictions, all_labels = [], [], []
+
+            for text, labels in dataloader:
+                labels = torch.tensor(labels).to(self.device)
+                input_dict = self.rln.encode_text(text)
+                with torch.no_grad():
+                    repr = self.rln(input_dict)
+                    output = fpln(repr)
+                    loss = self.loss_fn(output, labels)
+                loss = loss.item()
+                pred = model_utils.make_prediction(output.detach())
+                all_losses.append(loss)
+                all_predictions.extend(pred.tolist())
+                all_labels.extend(labels.tolist())
+
+        acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
+        logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
+                    "F1 score = {:.4f}".format(np.mean(all_losses), acc, prec, rec, f1))
+
+        return {"accuracy": acc, "precision": prec, "recall": rec, "f1": f1}
 
     def model_state(self):
         return {"rln": self.rln.state_dict(),

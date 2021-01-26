@@ -1,4 +1,5 @@
 defaults:
+  - data: classification
   - training: on_gpu
   - model: bert
   - learner: agem
@@ -15,6 +16,7 @@ replay_every: 9600 # Number of data points between replay
 updates: 5 # number of inner loop updates
 clip_grad_norm: 25 # gradient norm clipping (for replay learner)
 wandb: true # whether to use weights and biases for logging
+debug: false # some extra logging is done when set to true
 
 hydra:
   run:

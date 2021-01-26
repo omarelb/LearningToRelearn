@@ -1,12 +1,12 @@
 import logging
+import time
+
+import wandb
+import numpy as np
 import torch
 from torch import nn
-
-import numpy as np
-
 from torch.utils import data
 from transformers import AdamW
-import wandb
 
 import MetaLifeLongLanguage.datasets.utils as dataset_utils
 import MetaLifeLongLanguage.models.utils as model_utils
@@ -14,8 +14,8 @@ from MetaLifeLongLanguage.models.base_models import TransformerClsModel, ReplayM
 from MetaLifeLongLanguage.learner import Learner
 from MetaLifeLongLanguage.datasets.utils import batch_encode
 
-logging.basicConfig(level="INFO", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("AGEM-Log")
+# logging.basicConfig(level="INFO", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+# logger = logging.getLogger("AGEM-Log")
 
 class AGEM(Learner):
     def __init__(self, config):
@@ -24,9 +24,7 @@ class AGEM(Learner):
         self.write_prob = config.write_prob
         self.replay_rate = config.replay_rate
         self.replay_every = config.replay_every
-        self.device = config.training.device
         self.n_epochs = config.training.epochs
-        self.mini_batch_size = config.training.batch_size
         self.log_freq = config.training.log_freq
 
         self.model = TransformerClsModel(model_name=config.learner.model_name,
@@ -50,6 +48,7 @@ class AGEM(Learner):
     def train(self, dataloaders):
         self.model.train()
         dataloader = dataloaders["train"]
+        data_length = len(dataloader) * self.n_epochs
 
         for epoch in range(self.n_epochs):
             all_losses, all_predictions, all_labels = [], [], []
@@ -67,14 +66,14 @@ class AGEM(Learner):
                 all_losses.append(loss)
                 all_predictions.extend(pred.tolist())
                 all_labels.extend(labels.tolist())
-                self.current_iter += 1
                 self.memory.write_batch(text, labels)
 
                 if self.current_iter % self.log_freq == 0:
-                    self.write_log(all_predictions, all_labels, all_losses, data_length=len(dataloader))
+                    self.write_log(all_predictions, all_labels, all_losses, data_length=data_length)
+                    self.start_time = time.time()
                     all_losses, all_predictions, all_labels = [], [], []
-                if self.current_iter % self.config.training.save_freq == 0:
-                    self.save_checkpoint()
+                # if self.current_iter % self.config.training.save_freq == 0:
+                #     self.save_checkpoint()
                 self.current_iter += 1
             self.current_epoch += 1
 
@@ -111,9 +110,11 @@ class AGEM(Learner):
 
     def write_log(self, all_predictions, all_labels, all_losses, data_length):
         acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
+        time_per_iteration, estimated_time_left = self.time_metrics(data_length)
         self.logger.info(
-            "Iteration {}/{} ({}%) metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
+            "Iteration {}/{} ({:.2f}%) -- {:.3f} (sec/it) -- Time Left: {}\nMetrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
             "F1 score = {:.4f}".format(self.current_iter + 1, data_length, (self.current_iter + 1) / data_length * 100,
+                                       time_per_iteration, estimated_time_left,
                                        np.mean(all_losses), acc, prec, rec, f1))
         self.writer.add_scalar("Train/Accuracy", acc, self.current_iter)
         self.writer.add_scalar("Train/Precision", prec, self.current_iter)
@@ -121,12 +122,14 @@ class AGEM(Learner):
         self.writer.add_scalar("Train/F1-Score", f1, self.current_iter)
         self.writer.add_scalar("Train/Loss", np.mean(all_losses), self.current_iter)
         if self.config.wandb:
+            n_examples_seen = (self.current_iter + 1) * self.mini_batch_size
             wandb.log({
                 "accuracy": acc,
                 "precision": prec,
                 "recall": rec,
                 "f1": f1,
-                "loss": np.mean(all_losses)
+                "loss": np.mean(all_losses),
+                "examples_seen": n_examples_seen
             })
 
 
@@ -148,7 +151,7 @@ class AGEM(Learner):
             all_labels.extend(labels.tolist())
 
         acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
-        logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
+        self.logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
                     "F1 score = {:.4f}".format(np.mean(all_losses), acc, prec, rec, f1))
         wandb.log({"test_accuracy": acc, "test_precision": prec, "test_recall": rec, "test_f1": f1})
 

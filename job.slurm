@@ -1,14 +1,13 @@
 #!/bin/bash
 
-#SBATCH --job-name=hi
+#SBATCH --job-name=agem
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=3
-#SBATCH --time=01:00:00
+#SBATCH --time=00:10:00
 #SBATCH --mem=20G
 #SBATCH --partition=gpu_titanrtx_shared
 #SBATCH --gres=gpu:1
 #SBATCH --output=R-%x.%j.out
-#SBATCH --error=R-%x.%j.err
 
 #Loading modules
 module purge

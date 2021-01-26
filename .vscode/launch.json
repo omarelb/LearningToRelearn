@@ -10,7 +10,7 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "args": ["learner=anml", "training=on_cpu"]
+            "args": ["learner=agem", "training=on_gpu", "wandb=false"]
         }
     ]
 }

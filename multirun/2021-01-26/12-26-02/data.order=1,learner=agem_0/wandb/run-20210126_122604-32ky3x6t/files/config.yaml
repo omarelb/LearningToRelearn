@@ -1,0 +1,46 @@
+wandb_version: 1
+
+_content:
+  desc: null
+  value:
+    clip_grad_norm: '25'
+    data: '{''order'': 1, ''max_length'': 448, ''n_classes'': 33}'
+    inference: 'False'
+    learner: '{''inner_lr'': 0.001, ''meta_lr'': 1e-05, ''type'': ''agem'', ''model_name'':
+      ''bert'', ''lr'': 3e-05}'
+    model: '{''name'': ''bert''}'
+    replay_every: '9600'
+    replay_rate: '0.01'
+    seed: '42'
+    training: '{''device'': ''cuda'', ''epochs'': 1, ''valid_freq'': 100, ''save_freq'':
+      5000, ''log_freq'': 50, ''batch_size'': 16}'
+    updates: '5'
+    version: '0'
+    wandb: 'True'
+    write_prob: '1.0'
+_metadata:
+  desc: null
+  value: 'ContainerMetadata(ref_type=<class ''dict''>, object_type=None, optional=True,
+    key=None, flags={''struct'': True}, resolver_cache=defaultdict(<class ''dict''>,
+    {''now'': {''%Y-%m-%d'': ''2021-01-26'', ''%H-%M-%S'': ''12-26-02''}}), key_type=None,
+    element_type=None)'
+_parent:
+  desc: null
+  value: null
+_wandb:
+  desc: null
+  value:
+    cli_version: 0.10.14
+    framework: huggingface
+    huggingface_version: 3.0.2
+    is_jupyter_run: false
+    is_kaggle_kernel: false
+    python_version: 3.7.6
+    t:
+      1:
+      - 1
+      - 5
+      - 11
+      4: 3.7.6
+      5: 0.10.14
+      6: 3.0.2

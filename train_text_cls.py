@@ -33,7 +33,7 @@ def get_learner(config):
     elif config.learner.type == "agem":
         learner = AGEM(config)
     elif config.learner.type == "replay":
-        learner = Replay(donfig)
+        learner = Replay(config)
     elif config.learner.type == "maml":
         learner = MAML(config)
     elif config.learner.type == "oml":

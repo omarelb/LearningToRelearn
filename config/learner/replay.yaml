@@ -1,3 +1,4 @@
 # @package _group_
 type: replay # multitask learning
 model_name: bert
+lr: 0.00003
