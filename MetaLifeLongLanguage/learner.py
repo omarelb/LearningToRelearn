@@ -21,11 +21,13 @@ from omegaconf import DictConfig
 import wandb
 
 from MetaLifeLongLanguage.datasets.text_classification_dataset import get_datasets
+from MetaLifeLongLanguage.datasets.utils import batch_encode
 
 # plt.style.use("seaborn-paper")
 CHECKPOINTS = Path("model-checkpoints/")
 LOGS = Path("tensorboard-logs/")
 RESULTS = Path("results")
+EXPERIMENT_DIR = Path("experiments")
 BEST_MODEL_FNAME = "best-model.pt"
 
 
@@ -39,13 +41,15 @@ class Learner:
     All the parameters that drive the experiment behaviour are specified in a config dictionary.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, experiment_path=None):
         """Instantiate a trainer for autopunctuation models.
 
         Parameters
         ----------
         config: 
             dict of parameters that drive the training behaviour.
+        experiment_dir:
+            path to experiment directory if it already exists
         """
         self.config = config
         self.logger = logging.getLogger(__name__)
@@ -60,7 +64,8 @@ class Learner:
                     self.logger.info("wandb initialization failed. Retrying..")
                     time.sleep(10)
 
-        experiment_path = os.getcwd() # hydra changes the runtime to the experiment folder
+        if experiment_path is None:
+            experiment_path = os.getcwd() # hydra changes the runtime to the experiment folder
         # Experiment output directory
         self.exp_dir = Path(experiment_path)
 
@@ -78,6 +83,8 @@ class Learner:
         self.writer = SummaryWriter(log_dir=self.log_dir)
 
         self.results_dir = self.exp_dir / RESULTS
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+
         if config.debug:
             self.logger.setLevel(logging.DEBUG)
         self.logger.info("-"*50)
@@ -86,8 +93,8 @@ class Learner:
 
         self.logger.info("-"*50 + "\n" + f"CONFIG:\n{self.config}\n" + "-"*50)
 
-        if checkpoint_exists:
-            self.logger.info(f"Checkpoint for {self.exp_dir.name} ALREADY EXISTS. Continuing training.")
+        # if checkpoint_exists:
+        #     self.logger.info(f"Checkpoint for {self.exp_dir.name} ALREADY EXISTS. Continuing training.")
 
         self.logger.info(f"Setting seed: {self.config.seed}")
         np.random.seed(self.config.seed)
@@ -107,6 +114,7 @@ class Learner:
         self.mini_batch_size = config.training.batch_size
 
         self.start_time = time.time()
+        self.last_checkpoint_time = self.start_time
         # if checkpoint_exists:
         #     last_checkpoint = get_last_checkpoint_path(self.checkpoint_dir)
         #     self.logger.info(f"Loading model checkpoint from {last_checkpoint}")
@@ -123,17 +131,17 @@ class Learner:
         results = {}
         for dataset in datasets:
             dataset_name = dataset.__class__.__name__
-            logger.info("Testing on {}".format(dataset_name))
-            test_dataloader = data.DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False,
-                                              collate_fn=batch_encode)
+            self.logger.info("Testing on {}".format(dataset_name))
+            test_dataloader = DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False,
+                                         collate_fn=batch_encode)
             dataset_results = self.evaluate(dataloader=test_dataloader)
-            accuracies.append(results["accuracy"])
-            precisions.append(results["precision"])
-            recalls.append(results["recall"])
-            f1s.append(results["f1"])
+            accuracies.append(dataset_results["accuracy"])
+            precisions.append(dataset_results["precision"])
+            recalls.append(dataset_results["recall"])
+            f1s.append(dataset_results["f1"])
             results[dataset_name] = dataset_results
 
-        logger.info("Overall test metrics: Accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
+        self.logger.info("Overall test metrics: Accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
                     "F1 score = {:.4f}".format(np.mean(accuracies), np.mean(precisions), np.mean(recalls),
                                                np.mean(f1s)))
         return results
@@ -164,17 +172,21 @@ class Learner:
 
         file_name = self.checkpoint_dir / file_name
         state = {
-            "epoch": self.current_epoch,
             "iter": self.current_iter,
             "best_accuracy": self.best_accuracy,
             "best_loss": self.best_loss,
             "model_state": self.model_state(),
             "optimizer": self.optimizer_state(),
         }
+        state = self.save_other_state_information(state)
         torch.save(state, file_name)
         self.logger.info(f"Checkpoint saved @ {file_name}")
 
-    def load_checkpoint(self, file_name: str):
+    def save_other_state_information(self, state):
+        """Any learner specific state information is added here"""
+        return state
+
+    def load_checkpoint(self, file_name: str = None):
         """Load the checkpoint with the given file name
 
         Checkpoint must contain:
@@ -190,16 +202,20 @@ class Learner:
             Name of the checkpoint file.
         """
         try:
-            file_name = self.checkpoint_dir / file_name
+            if file_name is None:
+                file_name = self.get_last_checkpoint_path()
+            else:
+                file_name = self.checkpoint_dir / file_name
             self.logger.info(f"Loading checkpoint from {file_name}")
             checkpoint = torch.load(file_name, self.config.training.device)
 
-            self.current_epoch = checkpoint["epoch"]
+            # self.current_epoch = checkpoint["epoch"]
             self.current_iter = checkpoint["iter"]
             self.best_accuracy = checkpoint["best_accuracy"]
             self.best_loss = checkpoint["best_loss"]
             self.load_model_state(checkpoint)
             self.load_optimizer_state(checkpoint)
+            self.load_other_state_information(checkpoint)
 
         except OSError:
             self.logger.error(f"No checkpoint exists @ {self.checkpoint_dir}")
@@ -215,6 +231,9 @@ class Learner:
 
     def load_optimizer_state(self, checkpoint):
         self.optimizer.load_state_dict(checkpoint["optimizer"])
+
+    def load_other_state_information(self, checkpoint):
+        pass
         
     def get_datasets(self, data_dir, order):
         return get_datasets(data_dir, order)
@@ -225,23 +244,34 @@ class Learner:
         estimated_time_left = time.strftime('%H:%M:%S', time.gmtime(time_per_iteration * (data_length - (self.current_iter + 1))))
         return time_per_iteration, estimated_time_left
 
+    def time_checkpoint(self):
+        """Save a checkpoint when a certain amount of time has elapsed."""
+        curtime = time.time()
+        deltatime = curtime - self.last_checkpoint_time
+        # if current time is more than save_freq minutes from last checkpoint, save a checkpoint
+        if self.config.checkpoint_while_training and deltatime >= self.config.save_freq * 60:
+            self.logger.info(f"{deltatime / 60:.1f} minutes have elapsed, saving checkpoint")
+            self.save_checkpoint()
+            self.last_checkpoint_time = curtime
 
-def get_last_checkpoint_path(checkpoint_dir):
-    """Return path of the latest checkpoint in a given checkpoint directory."""
-    paths = list(checkpoint_dir.glob("Epoch*"))
-    if len(paths) > 0:
-        # parse epochs and steps from path names
-        epochs = []
-        steps = []
-        for path in paths:
-            epoch, step = path.stem.split("-")
-            epoch = int(epoch.split("[")[-1][:-1])
-            step = int(step.split("[")[-1][:-1])
-            epochs.append(epoch)
-            steps.append(step)
-        # sort first by epoch, then by step
-        last_model_ix = np.lexsort((steps, epochs))[-1]
-        return paths[last_model_ix]
+
+    def get_last_checkpoint_path(self, checkpoint_dir=None):
+        """Return path of the latest checkpoint in a given checkpoint directory."""
+        checkpoint_dir = checkpoint_dir if checkpoint_dir is not None else self.checkpoint_dir
+        paths = list(checkpoint_dir.glob("Epoch*"))
+        if len(paths) > 0:
+            # parse epochs and steps from path names
+            epochs = []
+            steps = []
+            for path in paths:
+                epoch, step = path.stem.split("-")
+                epoch = int(epoch.split("[")[-1][:-1])
+                step = int(step.split("[")[-1][:-1])
+                epochs.append(epoch)
+                steps.append(step)
+            # sort first by epoch, then by step
+            last_model_ix = np.lexsort((steps, epochs))[-1]
+            return paths[last_model_ix]
 
 
 def flatten_dict(d, parent_key='', sep='_'):

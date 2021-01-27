@@ -10,7 +10,8 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "args": ["learner=agem", "training=on_gpu", "wandb=false"]
+            "args": ["learner=oml", "training=debug", "wandb=false", "save_freq=0.25",
+                "+evaluate=\"learner=oml,save_freq=0.25,training=debug,wandb=false_2021-01-27_17-10-15\""]
         }
     ]
 }

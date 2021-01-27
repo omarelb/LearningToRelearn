@@ -2,6 +2,7 @@ import logging
 import os
 import random
 from argparse import ArgumentParser
+from pathlib import Path
 from datetime import datetime
 
 import numpy as np
@@ -13,7 +14,8 @@ from dataclasses import dataclass, field
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from MetaLifeLongLanguage.datasets.text_classification_dataset import get_dataset
+from MetaLifeLongLanguage.datasets.text_classification_dataset import get_datasets
+from MetaLifeLongLanguage.learner import EXPERIMENT_DIR
 from MetaLifeLongLanguage.models.cls_agem import AGEM
 from MetaLifeLongLanguage.models.cls_anml import ANML
 from MetaLifeLongLanguage.models.cls_baseline import Baseline
@@ -24,33 +26,43 @@ from MetaLifeLongLanguage.models.cls_replay import Replay
 logging.basicConfig(level="INFO", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("ContinualLearningLog")
 
-def get_learner(config):
+def get_learner(config, **kwargs):
     """
     Return instantiation of a model depending on its type specified in a config.
     """
     if config.learner.type in ("sequential", "multitask"):
-        return Baseline(config)
+        return Baseline(config, **kwargs)
     elif config.learner.type == "agem":
-        learner = AGEM(config)
+        learner = AGEM(config, **kwargs)
     elif config.learner.type == "replay":
-        learner = Replay(config)
+        learner = Replay(config, **kwargs)
     elif config.learner.type == "maml":
-        learner = MAML(config)
+        learner = MAML(config, **kwargs)
     elif config.learner.type == "oml":
-        learner = OML(config)
+        learner = OML(config, **kwargs)
     elif config.learner.type == "anml":
-        learner = ANML(config)
+        learner = ANML(config, **kwargs)
     else:
         raise NotImplementedError
     return learner
 
 @hydra.main(config_path="config", config_name="defaults.yaml")
 def main(config):
-    learner = get_learner(config)
-    datasets = learner.get_datasets(learner.data_dir, config.data.order)
-    learner.training(datasets)
+    # to load a checkpoint and perform inference, add +evaluate=<dir_of_experiment>
+    if "evaluate" not in config: 
+        learner = get_learner(config)
+        datasets = get_datasets(learner.data_dir, config.data.order)
+        learner.training(datasets)
 
-    learner.save_checkpoint()
+        learner.save_checkpoint()
+    else:
+        experiment_path = Path(hydra.utils.to_absolute_path(EXPERIMENT_DIR / config.evaluate))
+        config_file = experiment_path / '.hydra' / 'config.yaml'
+        config = OmegaConf.load(config_file)
+        config.wandb = False
+        learner = get_learner(config, experiment_path=experiment_path)
+        learner.load_checkpoint()
+        datasets = get_datasets(learner.data_dir, config.data.order)
 
     # validation set
     logger.info("----------Validation starts here----------")

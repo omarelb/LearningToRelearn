@@ -18,8 +18,8 @@ from MetaLifeLongLanguage.datasets.utils import batch_encode
 # logger = logging.getLogger("AGEM-Log")
 
 class AGEM(Learner):
-    def __init__(self, config):
-        super().__init__(config)
+    def __init__(self, config, **kwargs):
+        super().__init__(config, **kwargs)
         self.lr = config.learner.lr
         self.write_prob = config.write_prob
         self.replay_rate = config.replay_rate
@@ -70,10 +70,10 @@ class AGEM(Learner):
 
                 if self.current_iter % self.log_freq == 0:
                     self.write_log(all_predictions, all_labels, all_losses, data_length=data_length)
-                    self.start_time = time.time()
+                    self.start_time = time.time() # time from last log
                     all_losses, all_predictions, all_labels = [], [], []
                 # if self.current_iter % self.config.training.save_freq == 0:
-                #     self.save_checkpoint()
+                self.time_checkpoint()
                 self.current_iter += 1
             self.current_epoch += 1
 
@@ -138,7 +138,7 @@ class AGEM(Learner):
 
         self.model.eval()
 
-        for text, labels in dataloader:
+        for i, (text, labels) in enumerate(dataloader):
             labels = torch.tensor(labels).to(self.device)
             input_dict = self.model.encode_text(text)
             with torch.no_grad():
@@ -149,6 +149,8 @@ class AGEM(Learner):
             all_losses.append(loss)
             all_predictions.extend(pred.tolist())
             all_labels.extend(labels.tolist())
+            if i % 20 == 0:
+                self.logger.info(f"Batch {i + 1}/{len(dataloader)} processed")
 
         acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
         self.logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "

@@ -17,12 +17,12 @@ import MetaLifeLongLanguage.models.utils as model_utils
 from MetaLifeLongLanguage.models.base_models import ReplayMemory, TransformerClsModel, TransformerNeuromodulator
 from MetaLifeLongLanguage.learner import Learner
 
-logging.basicConfig(level="INFO", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("ANML-Log")
+# logging.basicConfig(level="INFO", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+# logger = logging.getLogger("ANML-Log")
 
 class ANML(Learner):
-    def __init__(self, config):
-        super().__init__(config)
+    def __init__(self, config, **kwargs):
+        super().__init__(config, **kwargs)
 
         self.inner_lr = config.learner.inner_lr
         self.meta_lr = config.learner.meta_lr
@@ -40,8 +40,8 @@ class ANML(Learner):
         self.memory = ReplayMemory(write_prob=self.write_prob, tuple_size=2)
         self.loss_fn = nn.CrossEntropyLoss()
 
-        logger.info("Loaded {} as NM".format(self.nm.__class__.__name__))
-        logger.info("Loaded {} as PN".format(self.pn.__class__.__name__))
+        self.logger.info("Loaded {} as NM".format(self.nm.__class__.__name__))
+        self.logger.info("Loaded {} as PN".format(self.pn.__class__.__name__))
 
         meta_params = [p for p in self.nm.parameters() if p.requires_grad] + \
                       [p for p in self.pn.parameters() if p.requires_grad]
@@ -52,8 +52,8 @@ class ANML(Learner):
 
     def training(self, datasets, **kwargs):
         replay_freq, replay_steps = self.replay_parameters()
-        logger.info("Replay frequency: {}".format(replay_freq))
-        logger.info("Replay steps: {}".format(replay_steps))
+        self.logger.info("Replay frequency: {}".format(replay_freq))
+        self.logger.info("Replay steps: {}".format(replay_steps))
         examples_seen = 0
 
         concat_dataset = data.ConcatDataset(datasets["train"])
@@ -76,7 +76,7 @@ class ANML(Learner):
                         support_set.append((text, labels))
                         examples_seen += self.mini_batch_size
                     except StopIteration:
-                        logger.info("Terminating training as all the data is seen")
+                        self.logger.info("Terminating training as all the data is seen")
                         return
 
                 for text, labels in support_set:
@@ -128,7 +128,7 @@ class ANML(Learner):
                         self.memory.write_batch(text, labels)
                         examples_seen += self.mini_batch_size
                     except StopIteration:
-                        logger.info("Terminating training as all the data is seen")
+                        self.logger.info("Terminating training as all the data is seen")
                         return
 
                 for text, labels in query_set:
@@ -190,6 +190,7 @@ class ANML(Learner):
                         "examples_seen": examples_seen
                     })
 
+                self.time_checkpoint()
                 self.current_iter += 1
 
     def evaluate(self, dataloader):
@@ -224,7 +225,7 @@ class ANML(Learner):
 
             all_losses, all_predictions, all_labels = [], [], []
 
-            for text, labels in dataloader:
+            for i, (text, labels) in enumerate(dataloader):
                 labels = torch.tensor(labels).to(self.device)
                 input_dict = self.pn.encode_text(text)
                 with torch.no_grad():
@@ -237,6 +238,8 @@ class ANML(Learner):
                 all_losses.append(loss)
                 all_predictions.extend(pred.tolist())
                 all_labels.extend(labels.tolist())
+                if i % 20 == 0:
+                    self.logger.info(f"Batch {i + 1}/{len(dataloader)} processed")
 
         acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
         self.logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
@@ -257,3 +260,11 @@ class ANML(Learner):
 
     def load_optimizer_state(self, checkpoint):
         self.meta_optimizer.load_state_dict(checkpoint["optimizer"])
+
+    def save_other_state_information(self, state):
+        """Any learner specific state information is added here"""
+        state["memory"] = self.memory
+        return state
+
+    def load_other_state_information(self, checkpoint):
+        self.memory = checkpoint["memory"]

@@ -13,16 +13,16 @@ import MetaLifeLongLanguage.models.utils as model_utils
 from MetaLifeLongLanguage.models.base_models import TransformerClsModel
 from MetaLifeLongLanguage.learner import Learner
 
-logging.basicConfig(level="INFO", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("Baseline-Log")
+# logging.basicConfig(level="INFO", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+# logger = logging.getLogger("Baseline-Log")
 
 
 class Baseline(Learner):
-    def __init__(self, config):
+    def __init__(self, config, **kwargs):
         """
         Baseline models: sequential and multitask setup.
         """
-        super().__init__(config)
+        super().__init__(config, **kwargs)
         self.lr = config.learner.lr
         self.type = config.learner.type
         self.n_epochs = config.training.epochs
@@ -31,7 +31,7 @@ class Baseline(Learner):
                                          n_classes=config.data.n_classes,
                                          max_length=config.data.max_length,
                                          device=self.device)
-        logger.info("Loaded {} as model".format(self.model.__class__.__name__))
+        self.logger.info("Loaded {} as model".format(self.model.__class__.__name__))
         self.loss_fn = nn.CrossEntropyLoss()
         self.log_freq = config.training.log_freq
         self.optimizer = AdamW([p for p in self.model.parameters() if p.requires_grad], lr=self.lr)
@@ -39,24 +39,25 @@ class Baseline(Learner):
     def training(self, datasets, **kwargs):
         train_datasets = datasets["train"]
         if self.type == "sequential":
+            data_length = sum([len(train_dataset) for train_dataset in train_datasets]) // self.mini_batch_size
             for train_dataset in train_datasets:
                 logger.info("Training on {}".format(train_dataset.__class__.__name__))
                 train_dataloader = data.DataLoader(train_dataset, batch_size=self.mini_batch_size, shuffle=False,
                                                    collate_fn=dataset_utils.batch_encode)
-                self.train(dataloader=train_dataloader)
+                self.train(dataloader=train_dataloader, data_length=data_length)
         elif self.type == "multitask":
             train_dataset = data.ConcatDataset(train_datasets)
-            logger.info("Training multi-task model on all datasets")
+            self.logger.info("Training multi-task model on all datasets")
             train_dataloader = data.DataLoader(train_dataset, batch_size=self.mini_batch_size, shuffle=True,
                                                collate_fn=dataset_utils.batch_encode)
             self.train(dataloader=train_dataloader)
         else:
             raise ValueError("Invalid training mode")
 
-    def train(self, dataloader):
+    def train(self, dataloader, data_length=None):
         self.model.train()
-        data_length = len(dataloader) * self.n_epochs
-
+        if data_length is None:
+            data_length = len(dataloader) * self.n_epochs
         for epoch in range(self.n_epochs):
             all_losses, all_predictions, all_labels = [], [], []
 
@@ -99,6 +100,7 @@ class Baseline(Learner):
                         })
                     all_losses, all_predictions, all_labels = [], [], []
                     self.start_time = time.time()
+                self.time_checkpoint()
                 self.current_iter += 1
 
     def evaluate(self, dataloader):
@@ -106,7 +108,7 @@ class Baseline(Learner):
 
         self.model.eval()
 
-        for text, labels in dataloader:
+        for i, (text, labels) in enumerate(dataloader):
             labels = torch.tensor(labels).to(self.device)
             input_dict = self.model.encode_text(text)
             with torch.no_grad():
@@ -117,9 +119,11 @@ class Baseline(Learner):
             all_losses.append(loss)
             all_predictions.extend(pred.tolist())
             all_labels.extend(labels.tolist())
+            if i % 20 == 0:
+                self.logger.info(f"Batch {i + 1}/{len(dataloader)} processed")
 
         acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
-        logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
+        self.logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
                     "F1 score = {:.4f}".format(np.mean(all_losses), acc, prec, rec, f1))
 
         return {"accuracy": acc, "precision": prec, "recall": rec, "f1": f1}

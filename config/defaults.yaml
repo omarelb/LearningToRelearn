@@ -7,6 +7,7 @@ defaults:
 learner:
   inner_lr: 1e-3
   meta_lr: 1e-5
+
 seed: 42 # random seed
 inference: false
 version: 0
@@ -15,6 +16,8 @@ replay_rate: 0.01 # replay rate from memory
 replay_every: 9600 # Number of data points between replay
 updates: 5 # number of inner loop updates
 clip_grad_norm: 25 # gradient norm clipping (for replay learner)
+checkpoint_while_training: true # whether to checkpoint while training
+save_freq: 60 # in minutes, specifies how often a model is saved
 wandb: true # whether to use weights and biases for logging
 debug: false # some extra logging is done when set to true
 

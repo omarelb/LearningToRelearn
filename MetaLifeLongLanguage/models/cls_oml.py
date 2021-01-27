@@ -17,14 +17,14 @@ import MetaLifeLongLanguage.models.utils as model_utils
 from MetaLifeLongLanguage.models.base_models import TransformerRLN, LinearPLN, ReplayMemory
 from MetaLifeLongLanguage.learner import Learner
 
-logging.basicConfig(level="INFO", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("OML-Log")
+# logging.basicConfig(level="INFO", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+# logger = logging.getLogger("OML-Log")
 
 
 class OML(Learner):
 
-    def __init__(self, config):
-        super().__init__(config)
+    def __init__(self, config, **kwargs):
+        super().__init__(config, **kwargs)
         self.inner_lr = config.learner.inner_lr
         self.meta_lr = config.learner.meta_lr
         self.write_prob = config.write_prob
@@ -38,8 +38,8 @@ class OML(Learner):
         self.memory = ReplayMemory(write_prob=self.write_prob, tuple_size=2)
         self.loss_fn = nn.CrossEntropyLoss()
 
-        logger.info("Loaded {} as RLN".format(self.rln.__class__.__name__))
-        logger.info("Loaded {} as PLN".format(self.pln.__class__.__name__))
+        self.logger.info("Loaded {} as RLN".format(self.rln.__class__.__name__))
+        self.logger.info("Loaded {} as PLN".format(self.pln.__class__.__name__))
 
         meta_params = [p for p in self.rln.parameters() if p.requires_grad] + \
                       [p for p in self.pln.parameters() if p.requires_grad]
@@ -49,14 +49,13 @@ class OML(Learner):
         self.inner_optimizer = optim.SGD(inner_params, lr=self.inner_lr)
 
 
-
     def training(self, datasets, **kwargs):
         train_datasets = datasets["train"]
         examples_seen = 0
 
         replay_freq, replay_steps = self.replay_parameters()
-        logger.info("Replay frequency: {}".format(replay_freq))
-        logger.info("Replay steps: {}".format(replay_steps))
+        self.logger.info("Replay frequency: {}".format(replay_freq))
+        self.logger.info("Replay steps: {}".format(replay_steps))
 
         concat_dataset = data.ConcatDataset(train_datasets)
         train_dataloader = iter(data.DataLoader(concat_dataset, batch_size=self.mini_batch_size, shuffle=False,
@@ -79,7 +78,7 @@ class OML(Learner):
                         support_set.append((text, labels))
                         examples_seen += self.mini_batch_size
                     except StopIteration:
-                        logger.info("Terminating training as all the data is seen")
+                        self.logger.info("Terminating training as all the data is seen")
                         return
 
                 for text, labels in support_set:
@@ -97,7 +96,7 @@ class OML(Learner):
 
                 acc, prec, rec, f1 = model_utils.calculate_metrics(task_predictions, task_labels)
 
-                logger.info("Episode {} support set: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, "
+                self.logger.info("Episode {} support set: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, "
                             "recall = {:.4f}, F1 score = {:.4f}".format(self.current_iter + 1,
                                                                         np.mean(support_loss), acc, prec, rec, f1))
                 self.writer.add_scalar("Train/Support/Accuracy", acc, self.current_iter)
@@ -130,7 +129,7 @@ class OML(Learner):
                         self.memory.write_batch(text, labels)
                         examples_seen += self.mini_batch_size
                     except StopIteration:
-                        logger.info("Terminating training as all the data is seen")
+                        self.logger.info("Terminating training as all the data is seen")
                         return
 
                 for text, labels in query_set:
@@ -171,7 +170,7 @@ class OML(Learner):
                 self.meta_optimizer.step()
                 self.meta_optimizer.zero_grad()
 
-                logger.info("Episode {} query set: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, "
+                self.logger.info("Episode {} query set: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, "
                             "recall = {:.4f}, F1 score = {:.4f}".format(self.current_iter + 1,
                                                                         np.mean(query_loss), np.mean(query_acc),
                                                                         np.mean(query_prec), np.mean(query_rec),
@@ -190,6 +189,7 @@ class OML(Learner):
                         "query_loss": np.mean(query_loss),
                         "examples_seen": examples_seen
                     })
+                self.time_checkpoint()
                 self.current_iter += 1
 
     def evaluate(self, dataloader):
@@ -222,12 +222,12 @@ class OML(Learner):
 
             acc, prec, rec, f1 = model_utils.calculate_metrics(task_predictions, task_labels)
 
-            logger.info("Support set metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, "
+            self.logger.info("Support set metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, "
                         "recall = {:.4f}, F1 score = {:.4f}".format(np.mean(support_loss), acc, prec, rec, f1))
 
             all_losses, all_predictions, all_labels = [], [], []
 
-            for text, labels in dataloader:
+            for i, (text, labels) in enumerate(dataloader):
                 labels = torch.tensor(labels).to(self.device)
                 input_dict = self.rln.encode_text(text)
                 with torch.no_grad():
@@ -239,9 +239,11 @@ class OML(Learner):
                 all_losses.append(loss)
                 all_predictions.extend(pred.tolist())
                 all_labels.extend(labels.tolist())
+                if i % 20 == 0:
+                    self.logger.info(f"Batch {i + 1}/{len(dataloader)} processed")
 
         acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
-        logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
+        self.logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
                     "F1 score = {:.4f}".format(np.mean(all_losses), acc, prec, rec, f1))
 
         return {"accuracy": acc, "precision": prec, "recall": rec, "f1": f1}
@@ -259,3 +261,12 @@ class OML(Learner):
 
     def load_optimizer_state(self, checkpoint):
         self.meta_optimizer.load_state_dict(checkpoint["optimizer"])
+
+    def save_other_state_information(self, state):
+        """Any learner specific state information is added here"""
+        state["memory"] = self.memory
+        return state
+
+    def load_other_state_information(self, checkpoint):
+        """Any learner specific state information is loaded here"""
+        self.memory = checkpoint["memory"]

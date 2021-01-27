@@ -13,14 +13,14 @@ import MetaLifeLongLanguage.models.utils as model_utils
 from MetaLifeLongLanguage.models.base_models import TransformerClsModel, ReplayMemory
 from MetaLifeLongLanguage.learner import Learner
 
-logging.basicConfig(level="INFO", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("Replay-Log")
+# logging.basicConfig(level="INFO", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+# logger = logging.getLogger("Replay-Log")
 
 
 class Replay(Learner):
 
-    def __init__(self, config):
-        super().__init__(config)
+    def __init__(self, config, **kwargs):
+        super().__init__(config, **kwargs)
 
         self.lr = config.learner.lr
         self.write_prob = config.write_prob
@@ -114,6 +114,7 @@ class Replay(Learner):
                         })
                     self.start_time = time.time()
                     all_losses, all_predictions, all_labels = [], [], []
+                self.time_checkpoint()
                 self.current_iter += 1
 
     def evaluate(self, dataloader):
@@ -121,7 +122,7 @@ class Replay(Learner):
 
         self.model.eval()
 
-        for text, labels in dataloader:
+        for i, (text, labels) in enumerate(dataloader):
             labels = torch.tensor(labels).to(self.device)
             input_dict = self.model.encode_text(text)
             with torch.no_grad():
@@ -132,6 +133,8 @@ class Replay(Learner):
             all_losses.append(loss)
             all_predictions.extend(pred.tolist())
             all_labels.extend(labels.tolist())
+            if i % 20 == 0:
+                self.logger.info(f"Batch {i + 1}/{len(dataloader)} processed")
 
         acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
         self.logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
