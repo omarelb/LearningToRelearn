@@ -58,7 +58,7 @@ class Learner:
         if config.wandb:
             while True:
                 try:
-                    wandb.init(project="relearning", config=flatten_dict(config))
+                    wandb.init(project="relearning", config=flatten_dict(config), name=config.name)
                     break
                 except:
                     self.logger.info("wandb initialization failed. Retrying..")

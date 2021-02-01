@@ -41,7 +41,7 @@ class Baseline(Learner):
         if self.type == "sequential":
             data_length = sum([len(train_dataset) for train_dataset in train_datasets]) // self.mini_batch_size
             for train_dataset in train_datasets:
-                logger.info("Training on {}".format(train_dataset.__class__.__name__))
+                self.logger.info("Training on {}".format(train_dataset.__class__.__name__))
                 train_dataloader = data.DataLoader(train_dataset, batch_size=self.mini_batch_size, shuffle=False,
                                                    collate_fn=dataset_utils.batch_encode)
                 self.train(dataloader=train_dataloader, data_length=data_length)
@@ -125,5 +125,7 @@ class Baseline(Learner):
         acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
         self.logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
                     "F1 score = {:.4f}".format(np.mean(all_losses), acc, prec, rec, f1))
+        if self.config.wandb:
+            wandb.log({"test_accuracy": acc, "test_precision": prec, "test_recall": rec, "test_f1": f1})
 
         return {"accuracy": acc, "precision": prec, "recall": rec, "f1": f1}
