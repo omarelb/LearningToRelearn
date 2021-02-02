@@ -139,7 +139,5 @@ class Replay(Learner):
         acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
         self.logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
                     "F1 score = {:.4f}".format(np.mean(all_losses), acc, prec, rec, f1))
-        if self.config.wandb:
-            wandb.log({"test_accuracy": acc, "test_precision": prec, "test_recall": rec, "test_f1": f1})
 
         return {"accuracy": acc, "precision": prec, "recall": rec, "f1": f1}

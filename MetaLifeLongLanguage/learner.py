@@ -10,6 +10,7 @@ import collections
 
 import torch
 import numpy as np
+import pandas as pd
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
@@ -28,6 +29,7 @@ CHECKPOINTS = Path("model-checkpoints/")
 LOGS = Path("tensorboard-logs/")
 RESULTS = Path("results")
 EXPERIMENT_DIR = Path("experiments")
+EXPERIMENT_IDS = Path(hydra.utils.to_absolute_path("experiment_ids.csv"))
 BEST_MODEL_FNAME = "best-model.pt"
 
 
@@ -56,14 +58,19 @@ class Learner:
 
         # weights and biases
         if config.wandb:
+            if config.name is None:
+                config.name = "unnamed"
+            experiment_id = update_experiment_ids(config)
             while True:
                 try:
-                    wandb.init(project="relearning", config=flatten_dict(config), name=config.name)
+                    wandb.init(project="relearning", config=flatten_dict(config),
+                               name=f"{experiment_id['name']}-{experiment_id['id']}")
                     break
                 except:
                     self.logger.info("wandb initialization failed. Retrying..")
                     time.sleep(10)
 
+        # experiment_path is only explicitly supplied during an evaluation run
         if experiment_path is None:
             experiment_path = os.getcwd() # hydra changes the runtime to the experiment folder
         # Experiment output directory
@@ -82,6 +89,7 @@ class Learner:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.writer = SummaryWriter(log_dir=self.log_dir)
 
+        # Test and evaluation results saved here
         self.results_dir = self.exp_dir / RESULTS
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -141,10 +149,18 @@ class Learner:
             f1s.append(dataset_results["f1"])
             results[dataset_name] = dataset_results
 
+        mean_results = {
+            "accuracy": np.mean(accuracies),
+            "precision": np.mean(precisions),
+            "recall": np.mean(recalls),
+            "f1": np.mean(f1s)
+        }
         self.logger.info("Overall test metrics: Accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
-                    "F1 score = {:.4f}".format(np.mean(accuracies), np.mean(precisions), np.mean(recalls),
-                                               np.mean(f1s)))
-        return results
+                    "F1 score = {:.4f}".format(
+                        mean_results["accuracy"], mean_results["precision"], mean_results["recall"],
+                        mean_results["f1"]
+                    ))
+        return results, mean_results
 
     def replay_parameters(self):
         if self.replay_rate != 0:
@@ -283,3 +299,23 @@ def flatten_dict(d, parent_key='', sep='_'):
         else:
             items.append((new_key, v))
     return dict(items)
+
+
+def update_experiment_ids(config):
+    """Make sure each named wandb run has a counter so as to avoid duplicates."""
+    if not EXPERIMENT_IDS.exists():
+        with open(EXPERIMENT_IDS, "w") as f:
+            f.write(f"name,id\n")
+            f.write(f"{config.name}, 0\n")
+    experiment_ids_df = pd.read_csv(EXPERIMENT_IDS)
+    in_data = (experiment_ids_df["name"] == config.name).any() # check if name is in experiments list
+    if in_data:
+        # increment counter for this experiment name to avoid duplicate names
+        id = experiment_ids_df.loc[experiment_ids_df["name"] == config.name, "id"].values[0] + 1
+        experiment_ids_df.loc[experiment_ids_df["name"] == config.name, "id"] = id
+        experiment_id = {"name": config.name, "id": id}
+    else:
+        experiment_id = {"name": config.name, "id": 1}
+        experiment_ids_df = experiment_ids_df.append(experiment_id, ignore_index=True)
+    experiment_ids_df.to_csv(EXPERIMENT_IDS)
+    return experiment_id
