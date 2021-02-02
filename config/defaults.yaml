@@ -3,6 +3,8 @@ defaults:
   - training: on_gpu
   - model: bert
   - learner: agem
+  - hydra/job_logging: colorlog
+  - hydra/hydra_logging: colorlog
 
 learner:
   inner_lr: 1e-3
@@ -24,7 +26,16 @@ name: # experiment name, not specified by default, making it None
 
 hydra:
   run:
-    dir: experiments/${hydra.job.override_dirname}_${now:%Y-%m-%d_%H-%M-%S}_${name}
+    dir: experiments/${hydra.job.override_dirname}_${now:%Y-%m-%d_%H-%M-%S}_${name}/seed=${seed}
   sweep:
     dir: experiments/sweep-${name}_${now:%Y-%m-%d_%H-%M-%S}
     subdir: ${hydra.job.override_dirname}_${hydra.job.num}
+  job:
+    config:
+      override_dirname:
+        exclude_keys:
+          - name
+          - wandb
+          - checkpoint_while_training
+          - save_freq
+          - seed

@@ -11,6 +11,7 @@ import logging
 MAX_TRAIN_SIZE = 115000
 MAX_VAL_SIZE = 5000
 MAX_TEST_SIZE = 7600
+MAX_DEBUG_SIZE = 4
 
 SAMPLE_SEED = 42
 
@@ -55,14 +56,14 @@ def preprocess(text):
     return str(text)
 
 
-def cache_filename(file_path, split, ext=".csv"):
+def cache_filename(file_path, split, ext=".csv", debug=False):
     """Create filename of preprocessed file from dataset settings."""
     file_path = Path(file_path)
     folder = file_path.parent
     name = file_path.stem
     n = MAX_TRAIN_SIZE if split == "train" else MAX_VAL_SIZE if split == "val" else MAX_TEST_SIZE
     if split == "val": name = "val"
-    new_name = f"preprocessed-{name}-seed_{SAMPLE_SEED}-n_{n}" + ext 
+    new_name = f"preprocessed-{name}-seed_{SAMPLE_SEED}-n_{n}" + ("_debug" if debug else "") + ext 
     return folder / new_name
     
 
@@ -97,25 +98,30 @@ class ClassificationDataset(data.Dataset):
                  split: bool,
                  n_classes: int,
                  reduce: bool = False,
-                 load_preprocessed_from_cache: bool = True):
+                 load_preprocessed_from_cache: bool = True,
+                 debug=False):
         assert split in ("train", "val", "test"), "specify correct split"
         file_path = Path(file_path)
         self.n_classes = n_classes
-        cache_file = cache_filename(file_path, split=split)
+        cache_file = cache_filename(file_path, split=split, debug=debug)
         if load_preprocessed_from_cache and cache_file.is_file():
                 # load file
                 self.data = pd.read_csv(cache_file)
         else:
+            # TODO: add debug mode
             self.data = self.read_data(file_path)
             if reduce:
-                if split == "train":
-                    self.data = self.data.sample(n=MAX_TRAIN_SIZE, random_state=SAMPLE_SEED)
+                train_size = MAX_DEBUG_SIZE if debug else MAX_TRAIN_SIZE
+                val_size = MAX_DEBUG_SIZE if debug else MAX_VAL_SIZE
+                test_size = MAX_DEBUG_SIZE if debug else MAX_TEST_SIZE
+                if split in ("train", "val"):
+                    self.data = self.data.sample(n=train_size + val_size, random_state=SAMPLE_SEED)
                     # not using train test split immediately to use same samples as Nithin
-                    train, val = train_test_split(self.data, train_size=MAX_TRAIN_SIZE - MAX_VAL_SIZE,
-                                                  test_size=MAX_VAL_SIZE, random_state=SAMPLE_SEED)
+                    train, val = train_test_split(self.data, train_size=train_size,
+                                                  test_size=val_size, random_state=SAMPLE_SEED)
                     self.data = train if split == "train" else val
                 else:
-                    self.data = self.data.sample(n=MAX_TEST_SIZE, random_state=SAMPLE_SEED)
+                    self.data = self.data.sample(n=test_size, random_state=SAMPLE_SEED)
             self.data["text"] = self.data["text"].apply(preprocess)
         if load_preprocessed_from_cache and not cache_file.is_file():
             self.data.to_csv(cache_file, index=False)
@@ -136,7 +142,7 @@ class ClassificationDataset(data.Dataset):
 
 
 class AGNewsDataset(ClassificationDataset):
-    def __init__(self, data_path, split, reduce=False, load_preprocessed_from_cache=True):
+    def __init__(self, data_path, split, reduce=False, load_preprocessed_from_cache=True, debug=False):
         """
         data_path: str
             Location of the data folder.
@@ -146,7 +152,7 @@ class AGNewsDataset(ClassificationDataset):
             "val": Path(data_path) / "ag_news_csv/train.csv",
             "test": Path(data_path) / "ag_news_csv/test.csv"
         }
-        super().__init__(paths[split], split, n_classes=4, reduce=reduce, load_preprocessed_from_cache=load_preprocessed_from_cache)
+        super().__init__(paths[split], split, n_classes=4, reduce=reduce, load_preprocessed_from_cache=load_preprocessed_from_cache, debug=debug)
 
     def read_data(self, file_path):
         data = pd.read_csv(file_path, header=None, sep=",", names=["labels", "title", "description"],
@@ -159,13 +165,13 @@ class AGNewsDataset(ClassificationDataset):
 
 
 class DBPediaDataset(ClassificationDataset):
-    def __init__(self, data_path, split, reduce=False, load_preprocessed_from_cache=True):
+    def __init__(self, data_path, split, reduce=False, load_preprocessed_from_cache=True, debug=False):
         paths = {
             "train": Path(data_path) / "dbpedia_csv/train.csv",
             "val": Path(data_path) / "dbpedia_csv/train.csv",
             "test": Path(data_path) / "dbpedia_csv/test.csv"
         }
-        super().__init__(paths[split], split, n_classes=14, reduce=reduce, load_preprocessed_from_cache=load_preprocessed_from_cache)
+        super().__init__(paths[split], split, n_classes=14, reduce=reduce, load_preprocessed_from_cache=load_preprocessed_from_cache, debug=debug)
 
     def read_data(self, file_path):
         data = pd.read_csv(file_path, header=None, sep=",", names=["labels", "title", "description"],
@@ -177,13 +183,13 @@ class DBPediaDataset(ClassificationDataset):
         return data
 
 class AmazonDataset(ClassificationDataset):
-    def __init__(self, data_path, split, reduce=False, load_preprocessed_from_cache=True):
+    def __init__(self, data_path, split, reduce=False, load_preprocessed_from_cache=True, debug=False):
         paths = {
             "train": Path(data_path) / "amazon_review_full_csv/train.csv",
             "val": Path(data_path) / "amazon_review_full_csv/train.csv",
             "test": Path(data_path) / "amazon_review_full_csv/test.csv"
         }
-        super().__init__(paths[split], split, n_classes=5, reduce=reduce, load_preprocessed_from_cache=load_preprocessed_from_cache)
+        super().__init__(paths[split], split, n_classes=5, reduce=reduce, load_preprocessed_from_cache=load_preprocessed_from_cache, debug=debug)
 
     def read_data(self, file_path):
         data = pd.read_csv(file_path, header=None, sep=",", names=["labels", "title", "description"],
@@ -196,13 +202,13 @@ class AmazonDataset(ClassificationDataset):
 
 
 class YelpDataset(ClassificationDataset):
-    def __init__(self, data_path, split, reduce=False, load_preprocessed_from_cache=True):
+    def __init__(self, data_path, split, reduce=False, load_preprocessed_from_cache=True, debug=False):
         paths = {
             "train": Path(data_path) / "yelp_review_full_csv/train.csv",
             "val": Path(data_path) / "yelp_review_full_csv/train.csv",
             "test": Path(data_path) / "yelp_review_full_csv/test.csv"
         }
-        super().__init__(paths[split], split, n_classes=5, reduce=reduce, load_preprocessed_from_cache=load_preprocessed_from_cache)
+        super().__init__(paths[split], split, n_classes=5, reduce=reduce, load_preprocessed_from_cache=load_preprocessed_from_cache, debug=debug)
 
     def read_data(self, file_path):
         data = pd.read_csv(file_path, header=None, sep=",", names=["labels", "text"],
@@ -213,13 +219,13 @@ class YelpDataset(ClassificationDataset):
 
 
 class YahooAnswersDataset(ClassificationDataset):
-    def __init__(self, data_path, split, reduce=False, load_preprocessed_from_cache=True):
+    def __init__(self, data_path, split, reduce=False, load_preprocessed_from_cache=True, debug=False):
         paths = {
             "train": Path(data_path) / "yahoo_answers_csv/train.csv",
             "val": Path(data_path) / "yahoo_answers_csv/train.csv",
             "test": Path(data_path) / "yahoo_answers_csv/test.csv"
         }
-        super().__init__(paths[split], split, n_classes=10, reduce=reduce, load_preprocessed_from_cache=load_preprocessed_from_cache)
+        super().__init__(paths[split], split, n_classes=10, reduce=reduce, load_preprocessed_from_cache=load_preprocessed_from_cache, debug=debug)
 
     def read_data(self, file_path):
         data = pd.read_csv(file_path, header=None, sep=",",
@@ -241,44 +247,23 @@ DATASET_MAPPING = [
 ]
 
 
-def get_dataset(data_path, dataset_id):
+def get_dataset(data_path, dataset_id, debug=False):
     """Return a single dataset given its id and path.
     
     Train, validation,.and test sets are returned.
+
+    If debug is set to True, only load a small subset of the data.
     """
     assert 0 <= dataset_id <= 4, "invalid dataset id"
     dataset = DATASET_MAPPING[dataset_id]
     return (
-        dataset(data_path, "train", reduce=True),
-        dataset(data_path, "val", reduce=True),
-        dataset(data_path, "test", reduce=True),
+        dataset(data_path, "train", reduce=True, debug=debug),
+        dataset(data_path, "val", reduce=True, debug=debug),
+        dataset(data_path, "test", reduce=True, debug=debug),
     ) 
-    # if dataset_id == 0:
-    #     train_dataset = AGNewsDataset(data_path, "train", reduce=True)
-    #     val_dataset = AGNewsDataset(data_path, "val", reduce=True)
-    #     test_dataset = AGNewsDataset(data_path, "test", reduce=True)
-    # elif dataset_id == 1:
-    #     train_dataset = AmazonDataset(data_path, "train", reduce=True)
-    #     val_dataset = AmazonDataset(data_path, "val", reduce=True)
-    #     test_dataset = AmazonDataset(data_path, "test", reduce=True)
-    # elif dataset_id == 2:
-    #     train_dataset = YelpDataset(data_path, "train", reduce=True)
-    #     val_dataset = YelpDataset(data_path, "val", reduce=True)
-    #     test_dataset = YelpDataset(data_path, "test", reduce=True)
-    # elif dataset_id == 3:
-    #     train_dataset = DBPediaDataset(data_path, "train", reduce=True)
-    #     val_dataset = DBPediaDataset(data_path, "val", reduce=True)
-    #     test_dataset = DBPediaDataset(data_path, "test", reduce=True)
-    # elif dataset_id == 4:
-    #     train_dataset = YahooAnswersDataset(data_path, "train", reduce=True)
-    #     val_dataset = YahooAnswersDataset(data_path, "val", reduce=True)
-    #     test_dataset = YahooAnswersDataset(data_path, "test", reduce=True)
-    # else:
-    #     raise Exception("Invalid dataset ID")
-    # return train_dataset, val_dataset, test_dataset
 
 
-def get_datasets(data_path, data_order):
+def get_datasets(data_path, data_order, debug=False):
     """
     Load multiple datasets according to an order index, where the order
     is defined by DATASET_ORDER_MAPPING in this file.
@@ -286,7 +271,7 @@ def get_datasets(data_path, data_order):
     logging.info(f"Loading data...")
     train_datasets, val_datasets, test_datasets = [], [], []
     for dataset_id in DATASET_ORDER_MAPPING[data_order]:
-        train_dataset, val_dataset, test_dataset = get_dataset(data_path, dataset_id)
+        train_dataset, val_dataset, test_dataset = get_dataset(data_path, dataset_id, debug=debug)
         logging.info("Loaded {}".format(train_dataset.__class__.__name__))
         # the same model is used for all tasks, so we need to shift labels of tasks
         train_dataset = offset_labels(train_dataset)
