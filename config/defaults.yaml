@@ -2,7 +2,7 @@ defaults:
   - data: classification
   - training: on_gpu
   - model: bert
-  - learner: agem
+  - learner: oml
   - hydra/job_logging: colorlog
   - hydra/hydra_logging: colorlog
 
@@ -21,7 +21,9 @@ clip_grad_norm: 25 # gradient norm clipping (for replay learner)
 checkpoint_while_training: true # whether to checkpoint while training
 save_freq: 60 # in minutes, specifies how often a model is saved
 wandb: true # whether to use weights and biases for logging
-debug: false # some extra logging is done when set to true
+# set to debug mode.
+# some extra logging is done, and a small dataset is used
+debug: false 
 name: # experiment name, not specified by default, making it None
 
 hydra:
