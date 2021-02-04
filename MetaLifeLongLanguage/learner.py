@@ -88,7 +88,6 @@ class Learner:
         # Tensorboard log directory
         self.log_dir = self.exp_dir / LOGS
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.writer = SummaryWriter(log_dir=self.log_dir)
 
         # Test and evaluation results saved here
         self.results_dir = self.exp_dir / RESULTS

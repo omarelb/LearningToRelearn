@@ -93,11 +93,6 @@ class MAML(Learner):
                 self.logger.info("Episode {} support set: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, "
                             "recall = {:.4f}, F1 score = {:.4f}".format(self.current_iter + 1,
                                                                         np.mean(support_loss), acc, prec, rec, f1))
-                self.writer.add_scalar("Train/Support/Accuracy", acc, self.current_iter)
-                self.writer.add_scalar("Train/Support/Precision", prec, self.current_iter)
-                self.writer.add_scalar("Train/Support/Recall", rec, self.current_iter)
-                self.writer.add_scalar("Train/Support/F1-Score", f1, self.current_iter)
-                self.writer.add_scalar("Train/Support/Loss", np.mean(support_loss), self.current_iter)
 
                 # Outer loop
                 query_loss, query_acc, query_prec, query_rec, query_f1 = [], [], [], [], []
@@ -149,11 +144,6 @@ class MAML(Learner):
                                                                         np.mean(query_loss), np.mean(query_acc),
                                                                         np.mean(query_prec), np.mean(query_rec),
                                                                         np.mean(query_f1)))
-                self.writer.add_scalar("Train/Query/Accuracy", np.mean(query_acc), self.current_iter)
-                self.writer.add_scalar("Train/Query/Precision", np.mean(query_prec), self.current_iter)
-                self.writer.add_scalar("Train/Query/Recall", np.mean(query_rec), self.current_iter)
-                self.writer.add_scalar("Train/Query/F1-Score", np.mean(query_f1), self.current_iter)
-                self.writer.add_scalar("Train/Query/Loss", np.mean(query_loss), self.current_iter)
 
                 self.current_iter += 1
 

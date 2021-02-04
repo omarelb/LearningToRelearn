@@ -98,11 +98,6 @@ class Replay(Learner):
                         "F1 score = {:.4f}".format(self.current_iter + 1, data_length, (self.current_iter + 1) / data_length * 100,
                                                 time_per_iteration, estimated_time_left,
                                                 np.mean(all_losses), acc, prec, rec, f1))
-                    self.writer.add_scalar("Train/Accuracy", acc, self.current_iter)
-                    self.writer.add_scalar("Train/Precision", prec, self.current_iter)
-                    self.writer.add_scalar("Train/Recall", rec, self.current_iter)
-                    self.writer.add_scalar("Train/F1-Score", f1, self.current_iter)
-                    self.writer.add_scalar("Train/Loss", np.mean(all_losses), self.current_iter)
                     if self.config.wandb:
                         wandb.log({
                             "accuracy": acc,
