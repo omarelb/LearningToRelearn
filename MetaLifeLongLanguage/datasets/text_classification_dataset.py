@@ -15,6 +15,14 @@ MAX_DEBUG_SIZE = 4
 
 SAMPLE_SEED = 42
 
+DATASET_MAPPING = [
+    AGNewsDataset, # 0
+    AmazonDataset, # 1
+    YelpDataset, # 2
+    DBPediaDataset, # 3
+    YahooAnswersDataset # 4
+]
+
 # Define the ordering of the datasets
 DATASET_ORDER_MAPPING = {
     1: [2, 0, 3, 1, 4],
@@ -237,14 +245,6 @@ class YahooAnswersDataset(ClassificationDataset):
         data.drop(columns=["question_title", "question_content", "best_answer"], inplace=True)
         return data
 
-
-DATASET_MAPPING = [
-    AGNewsDataset, # 0
-    AmazonDataset, # 1
-    YelpDataset, # 2
-    DBPediaDataset, # 3
-    YahooAnswersDataset # 4
-]
 
 
 def get_dataset(data_path, dataset_id, debug=False):
