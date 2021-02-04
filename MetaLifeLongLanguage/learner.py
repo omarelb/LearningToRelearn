@@ -7,6 +7,7 @@ import time
 import random
 import math
 import collections
+from filelock import FileLock
 
 import torch
 import numpy as np
@@ -191,10 +192,16 @@ class Learner:
             "iter": self.current_iter,
             "best_accuracy": self.best_accuracy,
             "best_loss": self.best_loss,
-            "model_state": self.model_state(),
-            "optimizer": self.optimizer_state(),
+            "model_state": self.model_state()
         }
+        if self.config.save_optimizer_state:
+            state["optimizer"] = self.optimizer_state()
         state = self.save_other_state_information(state)
+        # delete previous checkpoint to avoid hogging space
+        if self.config.delete_previous_checkpoint:
+            previous_checkpoint = self.get_last_checkpoint_path()
+            if previous_checkpoint is not None and previous_checkpoint.is_file():
+                previous_checkpoint.unlink()
         torch.save(state, file_name)
         self.logger.info(f"Checkpoint saved @ {file_name}")
 
@@ -230,7 +237,8 @@ class Learner:
             self.best_accuracy = checkpoint["best_accuracy"]
             self.best_loss = checkpoint["best_loss"]
             self.load_model_state(checkpoint)
-            self.load_optimizer_state(checkpoint)
+            if self.config.save_optimizer_state:
+                self.load_optimizer_state(checkpoint)
             self.load_other_state_information(checkpoint)
 
         except OSError:
@@ -303,19 +311,23 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 def update_experiment_ids(config):
     """Make sure each named wandb run has a counter so as to avoid duplicates."""
-    if not EXPERIMENT_IDS.exists():
-        with open(EXPERIMENT_IDS, "w") as f:
-            f.write(f"name,id\n")
-            f.write(f"{config.name}, 0\n")
-    experiment_ids_df = pd.read_csv(EXPERIMENT_IDS)
-    in_data = (experiment_ids_df["name"] == config.name).any() # check if name is in experiments list
-    if in_data:
-        # increment counter for this experiment name to avoid duplicate names
-        id = experiment_ids_df.loc[experiment_ids_df["name"] == config.name, "id"].values[0] + 1
-        experiment_ids_df.loc[experiment_ids_df["name"] == config.name, "id"] = id
-        experiment_id = {"name": config.name, "id": id}
-    else:
-        experiment_id = {"name": config.name, "id": 1}
-        experiment_ids_df = experiment_ids_df.append(experiment_id, ignore_index=True)
-    experiment_ids_df.to_csv(EXPERIMENT_IDS)
-    return experiment_id
+    # lock to avoid concurrent reading
+    lock = FileLock(EXPERIMENT_IDS.as_posix() + ".lock", timeout=10)
+
+    with lock:
+        if not EXPERIMENT_IDS.exists():
+            with open(EXPERIMENT_IDS, "w") as f:
+                f.write(f"name,id\n")
+                f.write(f"{config.name}, 0\n")
+        experiment_ids_df = pd.read_csv(EXPERIMENT_IDS)
+        in_data = (experiment_ids_df["name"] == config.name).any() # check if name is in experiments list
+        if in_data:
+            # increment counter for this experiment name to avoid duplicate names
+            id = experiment_ids_df.loc[experiment_ids_df["name"] == config.name, "id"].values[0] + 1
+            experiment_ids_df.loc[experiment_ids_df["name"] == config.name, "id"] = id
+            experiment_id = {"name": config.name, "id": id}
+        else:
+            experiment_id = {"name": config.name, "id": 1}
+            experiment_ids_df = experiment_ids_df.append(experiment_id, ignore_index=True)
+        experiment_ids_df.to_csv(EXPERIMENT_IDS, index=False)
+        return experiment_id

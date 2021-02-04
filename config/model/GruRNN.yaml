@@ -1,8 +1,0 @@
-model:
-  class: autopunctuation.models.GruRNN.GruRNN 
-  params:
-    input_size: 16
-    hidden_size: 64
-    output_size: 16
-    layers: 1
-    bi: True

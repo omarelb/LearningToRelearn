@@ -239,11 +239,11 @@ class YahooAnswersDataset(ClassificationDataset):
 
 
 DATASET_MAPPING = [
-    AGNewsDataset,
-    AmazonDataset,
-    YelpDataset,
-    DBPediaDataset,
-    YahooAnswersDataset
+    AGNewsDataset, # 0
+    AmazonDataset, # 1
+    YelpDataset, # 2
+    DBPediaDataset, # 3
+    YahooAnswersDataset # 4
 ]
 
 
