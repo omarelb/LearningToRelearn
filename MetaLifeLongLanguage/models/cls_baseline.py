@@ -53,6 +53,12 @@ class Baseline(Learner):
             self.train(dataloader=train_dataloader)
         elif self.type == "single":
             # train on a single task / dataset
+            order = datasets["order"]
+            train_dataset = train_datasets[order.index(self.config.learner.dataset)]
+            self.logger.info(f"Training single model on dataset {self.config.learner.dataset}")
+            train_dataloader = data.DataLoader(train_dataset, batch_size=self.mini_batch_size, shuffle=True,
+                                               collate_fn=dataset_utils.batch_encode)
+            self.train(dataloader=train_dataloader)
         else:
             raise ValueError("Invalid training mode")
 
@@ -99,6 +105,45 @@ class Baseline(Learner):
                     self.start_time = time.time()
                 self.time_checkpoint()
                 self.current_iter += 1
+
+    def testing(self, datasets):
+        """
+        Parameters
+        ---
+        datasets: List[Dataset]
+            Test datasets.
+        """
+        accuracies, precisions, recalls, f1s = [], [], [], []
+        results = {}
+        # only have one dataset if type is single
+        if self.type == "single":
+            order = datasets["order"]
+            train_dataset = train_datasets[order.index(self.config.learner.dataset)]
+            datasets = [train_dataset]
+        for dataset in datasets:
+            dataset_name = dataset.__class__.__name__
+            self.logger.info("Testing on {}".format(dataset_name))
+            test_dataloader = DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False,
+                                         collate_fn=batch_encode)
+            dataset_results = self.evaluate(dataloader=test_dataloader)
+            accuracies.append(dataset_results["accuracy"])
+            precisions.append(dataset_results["precision"])
+            recalls.append(dataset_results["recall"])
+            f1s.append(dataset_results["f1"])
+            results[dataset_name] = dataset_results
+
+        mean_results = {
+            "accuracy": np.mean(accuracies),
+            "precision": np.mean(precisions),
+            "recall": np.mean(recalls),
+            "f1": np.mean(f1s)
+        }
+        self.logger.info("Overall test metrics: Accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
+                    "F1 score = {:.4f}".format(
+                        mean_results["accuracy"], mean_results["precision"], mean_results["recall"],
+                        mean_results["f1"]
+                    ))
+        return results, mean_results
 
     def evaluate(self, dataloader):
         all_losses, all_predictions, all_labels = [], [], []

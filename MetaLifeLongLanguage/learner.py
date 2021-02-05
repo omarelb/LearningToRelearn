@@ -64,8 +64,8 @@ class Learner:
             experiment_id = update_experiment_ids(config)
             while True:
                 try:
-                    wandb.init(project="relearning", config=flatten_dict(config),
-                               name=f"{experiment_id['name']}-{experiment_id['id']}")
+                    self.wandb_run = wandb.init(project="relearning", config=flatten_dict(config),
+                               name=f"{experiment_id['name']}-{experiment_id['id']}", reinit=True)
                     break
                 except:
                     self.logger.info("wandb initialization failed. Retrying..")
