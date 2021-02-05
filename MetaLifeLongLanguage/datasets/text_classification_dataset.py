@@ -15,21 +15,14 @@ MAX_DEBUG_SIZE = 4
 
 SAMPLE_SEED = 42
 
-DATASET_MAPPING = [
-    AGNewsDataset, # 0
-    AmazonDataset, # 1
-    YelpDataset, # 2
-    DBPediaDataset, # 3
-    YahooAnswersDataset # 4
-]
-
 # Define the ordering of the datasets
 DATASET_ORDER_MAPPING = {
-    1: [2, 0, 3, 1, 4],
-    2: [3, 4, 0, 1, 2],
-    3: [2, 4, 1, 3, 0],
-    4: [0, 2, 1, 4, 3]
+    1: ["yelp", "agnews", "dbpedia", "amazon", "yahoo"],
+    2: ["dbpedia", "yahoo", "agnews", "amazon", "yelp"],
+    3: ["yelp", "yahoo", "amazon", "dbpedia", "agnews"],
+    4: ["agnews", "yelp", "amazon", "yahoo", "dbpedia"]
 }
+
 
 def preprocess(text):
     """
@@ -245,6 +238,15 @@ class YahooAnswersDataset(ClassificationDataset):
         data.drop(columns=["question_title", "question_content", "best_answer"], inplace=True)
         return data
 
+# this dict should stay in this position since it depends on the classes defined above, and is used in functions below
+DATASET_MAPPING = {
+    "agnews": AGNewsDataset, # 0
+    "amazon": AmazonDataset, # 1
+    "yelp": YelpDataset, # 2
+    "dbpedia": DBPediaDataset, # 3
+    "yahoo": YahooAnswersDataset # 4
+}
+
 
 
 def get_dataset(data_path, dataset_id, debug=False):
@@ -254,7 +256,7 @@ def get_dataset(data_path, dataset_id, debug=False):
 
     If debug is set to True, only load a small subset of the data.
     """
-    assert 0 <= dataset_id <= 4, "invalid dataset id"
+    assert dataset_id in ("yelp", "agnews", "dbpedia", "amazon", "yahoo"), "invalid dataset id"
     dataset = DATASET_MAPPING[dataset_id]
     return (
         dataset(data_path, "train", reduce=True, debug=debug),
@@ -285,6 +287,7 @@ def get_datasets(data_path, data_order, debug=False):
         "train": train_datasets,
         "val": val_datasets,
         "test": test_datasets,
+        "order": DATASET_ORDER_MAPPING[data_order]
     }
 
 def offset_labels(dataset):
