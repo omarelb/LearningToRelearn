@@ -19,6 +19,8 @@ replay_every: 9600 # Number of data points between replay
 updates: 5 # number of inner loop updates
 clip_grad_norm: 25 # gradient norm clipping (for replay learner)
 checkpoint_while_training: true # whether to checkpoint while training
+save_optimizer_state: false # whether to save the optimizer state when checkpointing
+delete_previous_checkpoint: true # whether to overwrite the previous checkpoint when saving a checkpoint
 save_freq: 60 # in minutes, specifies how often a model is saved
 wandb: true # whether to use weights and biases for logging
 # set to debug mode.
