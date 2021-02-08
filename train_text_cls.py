@@ -33,7 +33,7 @@ def get_learner(config, **kwargs):
     """
     Return instantiation of a model depending on its type specified in a config.
     """
-    if config.learner.type in ("sequential", "multitask"):
+    if config.learner.type in ("sequential", "multitask", "single"):
         return Baseline(config, **kwargs)
     elif config.learner.type == "agem":
         learner = AGEM(config, **kwargs)
@@ -82,19 +82,20 @@ def main(config):
 
     # validation set
     logger.info("----------Validation starts here----------")
-    results, mean_results = learner.testing(datasets["val"])
+    results, mean_results = learner.testing(datasets["val"], order=datasets["order"])
     mean_validation_results = {"validation_" + k : v for k, v in mean_results.items()}
     pd.DataFrame.from_dict(results, orient="index").to_csv(learner.results_dir / "validation_results.csv")
 
     # test set
     logger.info("----------Testing starts here----------")
-    results, mean_results = learner.testing(datasets["test"])
+    results, mean_results = learner.testing(datasets["test"], order=datasets["order"])
     mean_test_results = {"test_" + k : v for k, v in mean_results.items()}
     pd.DataFrame.from_dict(results, orient="index").to_csv(learner.results_dir / "test_results.csv")
 
     if config.wandb:
         wandb.log(mean_validation_results)
         wandb.log(mean_test_results)
+        learner.wandb_run.finish()
 
     # write results to a file
     write_results(config, mean_validation_results, mean_test_results)
