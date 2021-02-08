@@ -106,25 +106,26 @@ class Baseline(Learner):
                 self.time_checkpoint()
                 self.current_iter += 1
 
-    def testing(self, datasets):
+    def testing(self, datasets, order):
         """
         Parameters
         ---
         datasets: List[Dataset]
             Test datasets.
+        order: List[str]
+            Specifies order of encountered datasets
         """
         accuracies, precisions, recalls, f1s = [], [], [], []
         results = {}
         # only have one dataset if type is single
         if self.type == "single":
-            order = datasets["order"]
-            train_dataset = train_datasets[order.index(self.config.learner.dataset)]
+            train_dataset = datasets[order.index(self.config.learner.dataset)]
             datasets = [train_dataset]
         for dataset in datasets:
             dataset_name = dataset.__class__.__name__
             self.logger.info("Testing on {}".format(dataset_name))
-            test_dataloader = DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False,
-                                         collate_fn=batch_encode)
+            test_dataloader = data.DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False,
+                                         collate_fn=dataset_utils.batch_encode)
             dataset_results = self.evaluate(dataloader=test_dataloader)
             accuracies.append(dataset_results["accuracy"])
             precisions.append(dataset_results["precision"])

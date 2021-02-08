@@ -128,7 +128,7 @@ class Learner:
         #     self.logger.info(f"Loading model checkpoint from {last_checkpoint}")
         #     self.load_checkpoint(last_checkpoint.name)
 
-    def testing(self, datasets):
+    def testing(self, datasets, **kwargs):
         """
         Parameters
         ---
@@ -142,7 +142,7 @@ class Learner:
             self.logger.info("Testing on {}".format(dataset_name))
             test_dataloader = DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False,
                                          collate_fn=batch_encode)
-            dataset_results = self.evaluate(dataloader=test_dataloader)
+            dataset_results = self.evaluate(dataloader=test_dataloader, **kwargs)
             accuracies.append(dataset_results["accuracy"])
             precisions.append(dataset_results["precision"])
             recalls.append(dataset_results["recall"])
