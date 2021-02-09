@@ -15,6 +15,29 @@ MAX_DEBUG_SIZE = 4
 
 SAMPLE_SEED = 42
 
+DATASET_SETTINGS = {
+    "agnews": {
+        "n_classes": 4,
+        "path": "ag_news_csv"
+    }, # 0
+    "amazon": {
+        "n_classes": 5,
+        "path": "amazon_review_full_csv"
+    }, # 1
+    "yelp": {
+        "n_classes": 5,
+        "path": "yelp_review_full_csv"
+    }, # 2
+    "dbpedia": {
+        "n_classes": 14,
+        "path": "dbpedia_csv"
+    }, # 3
+    "yahoo": {
+        "n_classes": 10,
+        "path": "yahoo_answers_csv"
+    }
+}
+
 # Define the ordering of the datasets
 DATASET_ORDER_MAPPING = {
     1: ["yelp", "agnews", "dbpedia", "amazon", "yahoo"],
@@ -22,6 +45,7 @@ DATASET_ORDER_MAPPING = {
     3: ["yelp", "yahoo", "amazon", "dbpedia", "agnews"],
     4: ["agnews", "yelp", "amazon", "yahoo", "dbpedia"]
 }
+
 
 
 def preprocess(text):
@@ -74,13 +98,14 @@ class ClassificationDataset(data.Dataset):
 
     Input
     -----
+    name: name of dataset
+    data: pandas dataframe
+        If given, don't load from path.
     file_path:
         Path to underlying data.
     split: str
         Indicates whether it is a train or test split.
         One of {"train", "val", "test"}
-    n_classes:
-        Number of classes.
     reduce:
         Whether to take only a subsample of data. Subsample size is defined by constants
         above.
@@ -95,15 +120,26 @@ class ClassificationDataset(data.Dataset):
         Number of classes in dataset.
     """
     def __init__(self,
-                 file_path: Union[str, Path],
-                 split: bool,
-                 n_classes: int,
+                 name: str,
+                 data=None,
+                 data_path: Union[str, Path]=None,
+                 split: bool=None,
                  reduce: bool = False,
                  load_preprocessed_from_cache: bool = True,
                  debug=False):
+        settings = DATASET_SETTINGS[name]
+        self.name = name
+        self.n_classes = settings["n_classes"]
+        if data is not None:
+            self.data = data
+            return
+        assert data_path is not None and split is not None 
         assert split in ("train", "val", "test"), "specify correct split"
-        file_path = Path(file_path)
-        self.n_classes = n_classes
+        file_path = {
+            "train": Path(data_path) / settings["path"] / "train.csv",
+            "val": Path(data_path) / settings["path"] / "train.csv",
+            "test": Path(data_path) / settings["path"] / "test.csv"
+        }[split]
         cache_file = cache_filename(file_path, split=split, debug=debug)
         if load_preprocessed_from_cache and cache_file.is_file():
                 # load file
@@ -133,6 +169,7 @@ class ClassificationDataset(data.Dataset):
         """
         raise NotImplementedError(f"The method read_data should be implemented for subclass of {type(self)}")
 
+
     def __len__(self):
         return len(self.data)
 
@@ -143,18 +180,6 @@ class ClassificationDataset(data.Dataset):
 
 
 class AGNewsDataset(ClassificationDataset):
-    def __init__(self, data_path, split, reduce=False, load_preprocessed_from_cache=True, debug=False):
-        """
-        data_path: str
-            Location of the data folder.
-        """
-        paths = {
-            "train": Path(data_path) / "ag_news_csv/train.csv",
-            "val": Path(data_path) / "ag_news_csv/train.csv",
-            "test": Path(data_path) / "ag_news_csv/test.csv"
-        }
-        super().__init__(paths[split], split, n_classes=4, reduce=reduce, load_preprocessed_from_cache=load_preprocessed_from_cache, debug=debug)
-
     def read_data(self, file_path):
         data = pd.read_csv(file_path, header=None, sep=",", names=["labels", "title", "description"],
                                 index_col=False)
@@ -164,34 +189,8 @@ class AGNewsDataset(ClassificationDataset):
         data.dropna(inplace=True)
         return data
 
-
-class DBPediaDataset(ClassificationDataset):
-    def __init__(self, data_path, split, reduce=False, load_preprocessed_from_cache=True, debug=False):
-        paths = {
-            "train": Path(data_path) / "dbpedia_csv/train.csv",
-            "val": Path(data_path) / "dbpedia_csv/train.csv",
-            "test": Path(data_path) / "dbpedia_csv/test.csv"
-        }
-        super().__init__(paths[split], split, n_classes=14, reduce=reduce, load_preprocessed_from_cache=load_preprocessed_from_cache, debug=debug)
-
-    def read_data(self, file_path):
-        data = pd.read_csv(file_path, header=None, sep=",", names=["labels", "title", "description"],
-                                index_col=False)
-        data["text"] = data["title"] + ". " + data["description"]
-        data["labels"] = data["labels"] - 1
-        data.drop(columns=["title", "description"], inplace=True)
-        data.dropna(inplace=True)
-        return data
 
 class AmazonDataset(ClassificationDataset):
-    def __init__(self, data_path, split, reduce=False, load_preprocessed_from_cache=True, debug=False):
-        paths = {
-            "train": Path(data_path) / "amazon_review_full_csv/train.csv",
-            "val": Path(data_path) / "amazon_review_full_csv/train.csv",
-            "test": Path(data_path) / "amazon_review_full_csv/test.csv"
-        }
-        super().__init__(paths[split], split, n_classes=5, reduce=reduce, load_preprocessed_from_cache=load_preprocessed_from_cache, debug=debug)
-
     def read_data(self, file_path):
         data = pd.read_csv(file_path, header=None, sep=",", names=["labels", "title", "description"],
                                 index_col=False)
@@ -199,18 +198,20 @@ class AmazonDataset(ClassificationDataset):
         data["text"] = data["title"] + ". " + data["description"]
         data["labels"] = data["labels"] - 1
         data.drop(columns=["title", "description"], inplace=True)
+        return data
+
+class DBPediaDataset(ClassificationDataset):
+    def read_data(self, file_path):
+        data = pd.read_csv(file_path, header=None, sep=",", names=["labels", "title", "description"],
+                                index_col=False)
+        data["text"] = data["title"] + ". " + data["description"]
+        data["labels"] = data["labels"] - 1
+        data.drop(columns=["title", "description"], inplace=True)
+        data.dropna(inplace=True)
         return data
 
 
 class YelpDataset(ClassificationDataset):
-    def __init__(self, data_path, split, reduce=False, load_preprocessed_from_cache=True, debug=False):
-        paths = {
-            "train": Path(data_path) / "yelp_review_full_csv/train.csv",
-            "val": Path(data_path) / "yelp_review_full_csv/train.csv",
-            "test": Path(data_path) / "yelp_review_full_csv/test.csv"
-        }
-        super().__init__(paths[split], split, n_classes=5, reduce=reduce, load_preprocessed_from_cache=load_preprocessed_from_cache, debug=debug)
-
     def read_data(self, file_path):
         data = pd.read_csv(file_path, header=None, sep=",", names=["labels", "text"],
                                 index_col=False)
@@ -220,14 +221,6 @@ class YelpDataset(ClassificationDataset):
 
 
 class YahooAnswersDataset(ClassificationDataset):
-    def __init__(self, data_path, split, reduce=False, load_preprocessed_from_cache=True, debug=False):
-        paths = {
-            "train": Path(data_path) / "yahoo_answers_csv/train.csv",
-            "val": Path(data_path) / "yahoo_answers_csv/train.csv",
-            "test": Path(data_path) / "yahoo_answers_csv/test.csv"
-        }
-        super().__init__(paths[split], split, n_classes=10, reduce=reduce, load_preprocessed_from_cache=load_preprocessed_from_cache, debug=debug)
-
     def read_data(self, file_path):
         data = pd.read_csv(file_path, header=None, sep=",",
                                 names=["labels", "question_title", "question_content", "best_answer"],
@@ -238,6 +231,7 @@ class YahooAnswersDataset(ClassificationDataset):
         data.drop(columns=["question_title", "question_content", "best_answer"], inplace=True)
         return data
 
+
 # this dict should stay in this position since it depends on the classes defined above, and is used in functions below
 DATASET_MAPPING = {
     "agnews": AGNewsDataset, # 0
@@ -246,7 +240,6 @@ DATASET_MAPPING = {
     "dbpedia": DBPediaDataset, # 3
     "yahoo": YahooAnswersDataset # 4
 }
-
 
 
 def get_dataset(data_path, dataset_id, debug=False):
@@ -259,9 +252,9 @@ def get_dataset(data_path, dataset_id, debug=False):
     assert dataset_id in ("yelp", "agnews", "dbpedia", "amazon", "yahoo"), "invalid dataset id"
     dataset = DATASET_MAPPING[dataset_id]
     return (
-        dataset(data_path, "train", reduce=True, debug=debug),
-        dataset(data_path, "val", reduce=True, debug=debug),
-        dataset(data_path, "test", reduce=True, debug=debug),
+        dataset(name=dataset_id, data_path=data_path, split="train", reduce=True, debug=debug),
+        dataset(name=dataset_id, data_path=data_path, split="val", reduce=True, debug=debug),
+        dataset(name=dataset_id, data_path=data_path, split="test", reduce=True, debug=debug),
     ) 
 
 
