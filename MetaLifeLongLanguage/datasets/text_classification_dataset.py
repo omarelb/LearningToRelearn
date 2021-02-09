@@ -1,8 +1,10 @@
 import re
 from pathlib import Path
 from typing import Union, Tuple, List, Optional
+from collections import defaultdict
 
 import pandas as pd
+import numpy as np
 from sklearn.model_selection import train_test_split
 from torch.utils import data
 
@@ -282,6 +284,112 @@ def get_datasets(data_path, data_order, debug=False):
         "test": test_datasets,
         "order": DATASET_ORDER_MAPPING[data_order]
     }
+
+
+def get_continuum(datasets, order=None, n_samples=None, shuffle=False):
+    """
+    Generate a dataset representing a continuum of tasks.
+    
+    The structure of the continuum of tasks can be manipulated by the order and n_samples parameters.
+    
+    To ensure that each batch of data is from the same task, make sure that each entry in n_samples is a
+    multiple of the batch size.
+    
+    Parameters
+    ---
+    datasets: Dict[str, Dataset]
+        Maps dataset names to pytorch datasets.
+    order: List[str]
+        Specifies in which order tasks are seen. If None, defaults to data dict's order, which may be random
+        for some versions python. The order can contain the same dataset multiple times.
+        However, no duplicate samples are allowed.
+    n_samples: List[int]
+        Specifies how many samples are seen for every step of the order. If None, use all samples of datasets
+        specified in the order.
+    shuffle: bool
+        If true, the *order* is shuffled (not all datapoints).
+    
+    Returns
+    ---
+    Pytorch ConcatDataset:
+        Continuum of data.
+    """
+    if order is None:
+        order = [dataset_name for dataset_name in datasets.keys()]
+    data_lengths = {dataset_name: len(datasets[dataset_name]) for dataset_name in datasets.keys()}
+    # if not specified, use all samples of this dataset
+    if n_samples is None:
+        n_samples = [data_lengths[dataset_name] for dataset_name in order]
+    assert len(n_samples) == len(order), "order and n_samples must be same length"
+    # check input correctness
+    n_samples_per_task = defaultdict(int)
+    for dataset_name, n_sample in zip(order, n_samples):
+        n_samples_per_task[dataset_name] += n_sample
+        if n_samples_per_task[dataset_name] > data_lengths[dataset_name]:
+            raise AssertionError("The number of specified samples exceeds the number of samples in data, check n_samples")
+    
+    result = []
+    permutation = list(range(len(order)))
+    if shuffle:
+        # shuffle through the order (not through all samples, as is done with a dataloader)
+        np.random.shuffle(permutation)
+    # keep track of which indices are already used for each task/dataset
+    ixs_occupied = {}
+    for i in permutation:
+        dataset_name, n_sample = order[i], n_samples[i]
+        data_len = len(datasets[dataset_name])
+        if dataset_name not in ixs_occupied:
+            ixs_occupied[dataset_name] = []
+        ixs = np.random.choice(list(set(range(data_len)) - set(ixs_occupied[dataset_name])), size=n_sample,
+                               replace=False)
+        ixs_occupied[dataset_name].extend(ixs)
+        result.append(data.Subset(datasets[dataset_name], indices=ixs))
+
+    return data.ConcatDataset(result)
+
+# alternating
+def alternating_order(datasets, tasks, n_samples_per_switch, relative_frequencies=None):
+    """
+    Return an alternating task ordering scheme that can be used as input to the `get_continuum` function.
+    
+    Example: ["yelp", "amazon", "yelp", "amazon"], [10, 10, 10, 10]
+    
+    Input
+    ---
+    data: Dict[str, Dataset]
+        Maps dataset names to pytorch datasets.
+    tasks: List[str]
+        Names of tasks/datasets that should be alternated between.
+    n_samples_per_switch: int
+        Specifies the number of samples used for one task before switching
+    relative_frequences: List[int]
+        Specifies the relative sample frequency of each task. This is multiplied by `n_samples_per_swithch`.
+        Example:
+            relative_frequences = [2, 1] --> [20, 10, 20, 10]
+        
+    Returns
+    ---
+    Tuple[List[str], List[int]]:
+        order, n_samples
+        Can be used as input for the `get_continuum` function.
+    """
+    if relative_frequencies is None:
+        relative_frequencies = [1 for _ in tasks]
+    assert len(tasks) == len(relative_frequencies), "make sure relative frequencies has same length as tasks"
+    n_tasks = len(tasks)
+    smallest_data_length = min([len(datasets[dataset_name]) / relative_frequency for dataset_name, relative_frequency in
+                                zip(tasks, relative_frequencies)])
+
+    order = []
+    n_samples = []
+    n_batches = int(smallest_data_length // n_samples_per_switch)
+    for i in range(n_batches * n_tasks):
+        task_ix = i % len(tasks)
+        task = tasks[task_ix]
+        order.append(task)
+        n_samples.append(relative_frequencies[task_ix] * n_samples_per_switch)
+    return order, n_samples
+
 
 def offset_labels(dataset):
     """Shift labels of dataset depending on the dataset"""
