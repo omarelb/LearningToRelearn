@@ -178,7 +178,7 @@ class ClassificationDataset(data.Dataset):
     def __getitem__(self, index):
         text = self.data["text"].iloc[index]
         label = self.data["labels"].iloc[index]
-        return text, label
+        return text, label, self.name
 
 
 class AGNewsDataset(ClassificationDataset):
