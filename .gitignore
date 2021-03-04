@@ -515,7 +515,9 @@ TSWLatexianTemp*
 # End of https://www.toptal.com/developers/gitignore/api/images,vscode
 
 data/
+slurm-hyper-search
 experiments/
 *.pt
 *.out
 jobs/
+slurm_logs
