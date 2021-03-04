@@ -8,10 +8,11 @@ from torch.utils import data
 from transformers import AdamW
 import wandb
 
-import MetaLifeLongLanguage.datasets.utils as dataset_utils
-import MetaLifeLongLanguage.models.utils as model_utils
-from MetaLifeLongLanguage.models.base_models import TransformerClsModel
-from MetaLifeLongLanguage.learner import Learner
+import LearningToRelearn.datasets.utils as dataset_utils
+import LearningToRelearn.models.utils as model_utils
+from LearningToRelearn.models.base_models import TransformerClsModel
+from LearningToRelearn.learner import Learner
+from LearningToRelearn.datasets.text_classification_dataset import get_continuum, alternating_order
 
 # logging.basicConfig(level="INFO", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 # logger = logging.getLogger("Baseline-Log")
@@ -33,30 +34,36 @@ class Baseline(Learner):
                                          device=self.device)
         self.logger.info("Loaded {} as model".format(self.model.__class__.__name__))
         self.loss_fn = nn.CrossEntropyLoss()
-        self.log_freq = config.training.log_freq
         self.optimizer = AdamW([p for p in self.model.parameters() if p.requires_grad], lr=self.lr)
 
     def training(self, datasets, **kwargs):
-        train_datasets = datasets["train"]
+        train_datasets = {dataset_name: dataset for dataset_name, dataset in zip(datasets["order"], datasets["train"])}
+
         if self.type == "sequential":
-            data_length = sum([len(train_dataset) for train_dataset in train_datasets]) // self.mini_batch_size
-            for train_dataset in train_datasets:
+            data_length = sum([len(train_dataset) for train_dataset in train_datasets.values()]) // self.mini_batch_size
+            for train_dataset in get_continuum(train_datasets, order=datasets["order"], merge=False):
                 self.logger.info("Training on {}".format(train_dataset.__class__.__name__))
                 train_dataloader = data.DataLoader(train_dataset, batch_size=self.mini_batch_size, shuffle=False,
                                                    collate_fn=dataset_utils.batch_encode)
                 self.train(dataloader=train_dataloader, data_length=data_length)
         elif self.type == "multitask":
-            train_dataset = data.ConcatDataset(train_datasets)
             self.logger.info("Training multi-task model on all datasets")
-            train_dataloader = data.DataLoader(train_dataset, batch_size=self.mini_batch_size, shuffle=True,
+            train_dataloader = data.DataLoader(get_continuum(data), batch_size=self.mini_batch_size, shuffle=True,
                                                collate_fn=dataset_utils.batch_encode)
             self.train(dataloader=train_dataloader)
         elif self.type == "single":
             # train on a single task / dataset
-            order = datasets["order"]
-            train_dataset = train_datasets[order.index(self.config.learner.dataset)]
             self.logger.info(f"Training single model on dataset {self.config.learner.dataset}")
-            train_dataloader = data.DataLoader(train_dataset, batch_size=self.mini_batch_size, shuffle=True,
+            train_dataloader = data.DataLoader(get_continuum(train_datasets, order=[self.config.learner.dataset]),
+                                               batch_size=self.mini_batch_size, shuffle=True,
+                                               collate_fn=dataset_utils.batch_encode)
+            self.train(dataloader=train_dataloader)
+        elif self.type == "alternating":
+            order, n_samples = alternating_order(train_datasets, tasks=self.config.learner.data.alternating_tasks,
+                                                 n_samples_per_switch=self.config.learner.data.alternating_n_samples_per_switch,
+                                                 relative_frequencies=self.config.learner.data.alternating_relative_frequencies)
+            dataset = get_continuum(train_datasets, order=order, n_samples=n_samples)
+            train_dataloader = data.DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False,
                                                collate_fn=dataset_utils.batch_encode)
             self.train(dataloader=train_dataloader)
         else:

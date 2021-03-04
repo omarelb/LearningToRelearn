@@ -12,10 +12,11 @@ import numpy as np
 from torch.utils import data
 from transformers import AdamW
 
-import MetaLifeLongLanguage.datasets.utils as dataset_utils
-import MetaLifeLongLanguage.models.utils as model_utils
-from MetaLifeLongLanguage.models.base_models import TransformerRLN, LinearPLN, ReplayMemory
-from MetaLifeLongLanguage.learner import Learner
+import LearningToRelearn.datasets.utils as dataset_utils
+import LearningToRelearn.models.utils as model_utils
+from LearningToRelearn.models.base_models import TransformerRLN, LinearPLN, ReplayMemory
+from LearningToRelearn.learner import Learner
+from LearningToRelearn.datasets.text_classification_dataset import get_continuum
 
 # logging.basicConfig(level="INFO", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 # logger = logging.getLogger("OML-Log")
@@ -50,17 +51,16 @@ class OML(Learner):
 
 
     def training(self, datasets, **kwargs):
-        train_datasets = datasets["train"]
-        examples_seen = 0
-
         replay_freq, replay_steps = self.replay_parameters()
         self.logger.info("Replay frequency: {}".format(replay_freq))
         self.logger.info("Replay steps: {}".format(replay_steps))
 
-        concat_dataset = data.ConcatDataset(train_datasets)
+        train_datasets = {dataset_name: dataset for dataset_name, dataset in zip(datasets["order"], datasets["train"])}
+        concat_dataset = get_continuum(train_datasets, order=datasets["order"])
         train_dataloader = iter(data.DataLoader(concat_dataset, batch_size=self.mini_batch_size, shuffle=False,
                                                 collate_fn=dataset_utils.batch_encode))
 
+        examples_seen = 0
         while True:
             self.inner_optimizer.zero_grad()
             support_loss, support_acc, support_prec, support_rec, support_f1 = [], [], [], [], []

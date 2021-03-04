@@ -286,7 +286,7 @@ def get_datasets(data_path, data_order, debug=False):
     }
 
 
-def get_continuum(datasets, order=None, n_samples=None, shuffle=False):
+def get_continuum(datasets, order=None, n_samples=None, shuffle=False, merge=True):
     """
     Generate a dataset representing a continuum of tasks.
     
@@ -308,10 +308,12 @@ def get_continuum(datasets, order=None, n_samples=None, shuffle=False):
         specified in the order.
     shuffle: bool
         If true, the *order* is shuffled (not all datapoints).
+    merge: bool
+        If true, merge all the datasets into one ConcatDataset. Otherwise, keep it as a list of Subset datasets.
     
     Returns
     ---
-    Pytorch ConcatDataset:
+    Union[Pytorch ConcatDataset, List[Pytorch Subset Dataset]]:
         Continuum of data.
     """
     if order is None:
@@ -345,10 +347,13 @@ def get_continuum(datasets, order=None, n_samples=None, shuffle=False):
         ixs_occupied[dataset_name].extend(ixs)
         result.append(data.Subset(datasets[dataset_name], indices=ixs))
 
-    return data.ConcatDataset(result)
+    if merge:
+        return data.ConcatDataset(result)
+    else:
+        return result
 
 # alternating
-def alternating_order(datasets, tasks, n_samples_per_switch, relative_frequencies=None):
+def alternating_order(datasets, n_samples_per_switch, tasks=None, relative_frequencies=None):
     """
     Return an alternating task ordering scheme that can be used as input to the `get_continuum` function.
     
@@ -356,12 +361,13 @@ def alternating_order(datasets, tasks, n_samples_per_switch, relative_frequencie
     
     Input
     ---
-    data: Dict[str, Dataset]
+    datasets: Dict[str, Dataset]
         Maps dataset names to pytorch datasets.
-    tasks: List[str]
-        Names of tasks/datasets that should be alternated between.
     n_samples_per_switch: int
         Specifies the number of samples used for one task before switching
+    tasks: List[str]
+        Names of tasks/datasets that should be alternated between. If None, use all tasks
+        given in datasets.
     relative_frequences: List[int]
         Specifies the relative sample frequency of each task. This is multiplied by `n_samples_per_swithch`.
         Example:
@@ -373,7 +379,9 @@ def alternating_order(datasets, tasks, n_samples_per_switch, relative_frequencie
         order, n_samples
         Can be used as input for the `get_continuum` function.
     """
-    if relative_frequencies is None:
+    if tasks is None or len(tasks) == 0:
+        tasks = list(datasets.keys())
+    if relative_frequencies is None or len(relative_frequencies) == 0:
         relative_frequencies = [1 for _ in tasks]
     assert len(tasks) == len(relative_frequencies), "make sure relative frequencies has same length as tasks"
     n_tasks = len(tasks)

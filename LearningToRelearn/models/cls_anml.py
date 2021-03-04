@@ -12,10 +12,10 @@ import numpy as np
 from torch.utils import data
 from transformers import AdamW
 
-import MetaLifeLongLanguage.datasets.utils as dataset_utils
-import MetaLifeLongLanguage.models.utils as model_utils
-from MetaLifeLongLanguage.models.base_models import ReplayMemory, TransformerClsModel, TransformerNeuromodulator
-from MetaLifeLongLanguage.learner import Learner
+import LearningToRelearn.datasets.utils as dataset_utils
+import LearningToRelearn.models.utils as model_utils
+from LearningToRelearn.models.base_models import ReplayMemory, TransformerClsModel, TransformerNeuromodulator
+from LearningToRelearn.learner import Learner
 
 # logging.basicConfig(level="INFO", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 # logger = logging.getLogger("ANML-Log")

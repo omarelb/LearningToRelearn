@@ -22,8 +22,8 @@ import hydra
 from omegaconf import DictConfig
 import wandb
 
-from MetaLifeLongLanguage.datasets.text_classification_dataset import get_datasets
-from MetaLifeLongLanguage.datasets.utils import batch_encode
+from LearningToRelearn.datasets.text_classification_dataset import get_datasets
+from LearningToRelearn.datasets.utils import batch_encode
 
 # plt.style.use("seaborn-paper")
 CHECKPOINTS = Path("model-checkpoints/")
@@ -120,6 +120,7 @@ class Learner:
         self.device = config.training.device
         self.logger.info(f"Using device: {self.config.training.device}")
         self.mini_batch_size = config.training.batch_size
+        self.log_freq = config.training.log_freq
 
         self.start_time = time.time()
         self.last_checkpoint_time = self.start_time

@@ -8,11 +8,11 @@ from torch import nn
 from torch.utils import data
 from transformers import AdamW
 
-import MetaLifeLongLanguage.datasets.utils as dataset_utils
-import MetaLifeLongLanguage.models.utils as model_utils
-from MetaLifeLongLanguage.models.base_models import TransformerClsModel, ReplayMemory
-from MetaLifeLongLanguage.learner import Learner
-from MetaLifeLongLanguage.datasets.utils import batch_encode
+import LearningToRelearn.datasets.utils as dataset_utils
+import LearningToRelearn.models.utils as model_utils
+from LearningToRelearn.models.base_models import TransformerClsModel, ReplayMemory
+from LearningToRelearn.learner import Learner
+from LearningToRelearn.datasets.utils import batch_encode
 
 # logging.basicConfig(level="INFO", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 # logger = logging.getLogger("AGEM-Log")
@@ -25,7 +25,6 @@ class AGEM(Learner):
         self.replay_rate = config.replay_rate
         self.replay_every = config.replay_every
         self.n_epochs = config.training.epochs
-        self.log_freq = config.training.log_freq
 
         self.model = TransformerClsModel(model_name=config.learner.model_name,
                                          n_classes=config.data.n_classes,
