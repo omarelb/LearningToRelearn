@@ -4,6 +4,7 @@ import random
 from argparse import ArgumentParser
 from pathlib import Path
 from datetime import datetime
+import json
 
 import numpy as np
 import torch
@@ -50,6 +51,7 @@ def get_learner(config, **kwargs):
     return learner
 
 def write_results(config, mean_validation_results, mean_test_results):
+    """Write results from run to a results file for analysis purposes."""
     run_info = flatten_dict(config)
     for key in list(run_info.keys()):
         if key.startswith("hydra"):
@@ -69,9 +71,12 @@ def main(config):
         learner = get_learner(config)
         datasets = get_datasets(learner.data_dir, config.data.order, debug=config.debug)
         learner.training(datasets)
+        with open(learner.results_dir / "metrics.json", "w") as f:
+            json.dump(learner.metrics, f)
 
         learner.save_checkpoint()
     else:
+        # no training, just evaluate
         experiment_path = Path(hydra.utils.to_absolute_path(EXPERIMENT_DIR / config.evaluate))
         config_file = experiment_path / '.hydra' / 'config.yaml'
         config = OmegaConf.load(config_file)
