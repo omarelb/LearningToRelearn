@@ -9,6 +9,7 @@ defaults:
 learner:
   inner_lr: 1e-3
   meta_lr: 1e-5
+  model_name: bert
 
 seed: 42 # random seed
 inference: false

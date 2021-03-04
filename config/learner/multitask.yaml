@@ -1,7 +1,6 @@
 learner:
   type: multitask # multitask learning
   lr: 0.00003 # learning rate
-  model_name: bert
 
 training:
   epochs: 2

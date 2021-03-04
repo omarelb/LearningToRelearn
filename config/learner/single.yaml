@@ -1,5 +1,4 @@
 # @package _group_
 type: single # sequential learning
 lr: 0.00003 # learning rate
-model_name: bert
 dataset: "yelp" # which dataset to use
