@@ -67,6 +67,8 @@ class Baseline(Learner):
             train_dataloader = data.DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False,
                                                collate_fn=dataset_utils.batch_encode)
             self.train(dataloader=train_dataloader, datasets=datasets)
+        elif self.type == "relearning":
+            pass
         else:
             raise ValueError("Invalid training mode")
 
