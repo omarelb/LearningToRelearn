@@ -15,14 +15,14 @@ from dataclasses import dataclass, field
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from MetaLifeLongLanguage.datasets.text_classification_dataset import get_datasets
-from MetaLifeLongLanguage.learner import EXPERIMENT_DIR, flatten_dict
-from MetaLifeLongLanguage.models.cls_agem import AGEM
-from MetaLifeLongLanguage.models.cls_anml import ANML
-from MetaLifeLongLanguage.models.cls_baseline import Baseline
-from MetaLifeLongLanguage.models.cls_maml import MAML
-from MetaLifeLongLanguage.models.cls_oml import OML
-from MetaLifeLongLanguage.models.cls_replay import Replay
+from LearningToRelearn.datasets.text_classification_dataset import get_datasets
+from LearningToRelearn.learner import EXPERIMENT_DIR, flatten_dict
+from LearningToRelearn.models.cls_agem import AGEM
+from LearningToRelearn.models.cls_anml import ANML
+from LearningToRelearn.models.cls_baseline import Baseline
+from LearningToRelearn.models.cls_maml import MAML
+from LearningToRelearn.models.cls_oml import OML
+from LearningToRelearn.models.cls_replay import Replay
 
 RESULTS_FILE = Path(hydra.utils.to_absolute_path("results.csv"))
 
@@ -33,9 +33,9 @@ def get_learner(config, **kwargs):
     """
     Return instantiation of a model depending on its type specified in a config.
     """
-    if config.learner.type in ("sequential", "multitask", "single"):
+    if config.learner.type in ("sequential", "multitask", "single", "alternating"):
         return Baseline(config, **kwargs)
-    elif config.learner.type == "agem":
+    if config.learner.type == "agem":
         learner = AGEM(config, **kwargs)
     elif config.learner.type == "replay":
         learner = Replay(config, **kwargs)
