@@ -1,7 +1,9 @@
 # @package _group_
 device: 'cuda'
 epochs: 1 # number of epochs
+batch_size: 16
 valid_freq: 100
 save_freq: 5000
 log_freq: 50
-batch_size: 16
+validate_freq: 50
+n_validation_samples: 100

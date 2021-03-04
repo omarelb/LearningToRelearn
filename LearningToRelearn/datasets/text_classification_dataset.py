@@ -260,7 +260,7 @@ def get_dataset(data_path, dataset_id, debug=False):
     ) 
 
 
-def get_datasets(data_path, data_order, debug=False):
+def get_datasets(data_path, data_order=1, debug=False):
     """
     Load multiple datasets according to an order index, where the order
     is defined by DATASET_ORDER_MAPPING in this file.
@@ -316,11 +316,11 @@ def get_continuum(datasets, order=None, n_samples=None, shuffle=False, merge=Tru
     Union[Pytorch ConcatDataset, List[Pytorch Subset Dataset]]:
         Continuum of data.
     """
-    if order is None:
+    if order is None or len(order) == 0:
         order = [dataset_name for dataset_name in datasets.keys()]
     data_lengths = {dataset_name: len(datasets[dataset_name]) for dataset_name in datasets.keys()}
     # if not specified, use all samples of this dataset
-    if n_samples is None:
+    if n_samples is None or len(n_samples) == 0:
         n_samples = [data_lengths[dataset_name] for dataset_name in order]
     assert len(n_samples) == len(order), "order and n_samples must be same length"
     # check input correctness
@@ -411,3 +411,15 @@ def offset_labels(dataset):
         offset_by = 5 + 4 + 14
     dataset.data["labels"] = dataset.data["labels"] + offset_by
     return dataset
+
+
+def datasets_dict(datasets, order):
+    """
+    Create a dict from a list of datasets and its order which specifies the name of each dataset.
+
+    Parameters
+    ---
+    datasets: List[Dataset]
+    order: List[str]
+    """
+    return {dataset_name: dataset for dataset_name, dataset in zip(order, datasets)}

@@ -12,7 +12,7 @@ import LearningToRelearn.datasets.utils as dataset_utils
 import LearningToRelearn.models.utils as model_utils
 from LearningToRelearn.models.base_models import TransformerClsModel
 from LearningToRelearn.learner import Learner
-from LearningToRelearn.datasets.text_classification_dataset import get_continuum, alternating_order
+from LearningToRelearn.datasets.text_classification_dataset import get_continuum, alternating_order, datasets_dict
 
 # logging.basicConfig(level="INFO", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 # logger = logging.getLogger("Baseline-Log")
@@ -37,7 +37,8 @@ class Baseline(Learner):
         self.optimizer = AdamW([p for p in self.model.parameters() if p.requires_grad], lr=self.lr)
 
     def training(self, datasets, **kwargs):
-        train_datasets = {dataset_name: dataset for dataset_name, dataset in zip(datasets["order"], datasets["train"])}
+        # train_datasets = {dataset_name: dataset for dataset_name, dataset in zip(datasets["order"], datasets["train"])}
+        train_datasets = datasets_dict(datasets["train"], datasets["order"])
 
         if self.type == "sequential":
             data_length = sum([len(train_dataset) for train_dataset in train_datasets.values()]) // self.mini_batch_size
@@ -45,19 +46,19 @@ class Baseline(Learner):
                 self.logger.info("Training on {}".format(train_dataset.__class__.__name__))
                 train_dataloader = data.DataLoader(train_dataset, batch_size=self.mini_batch_size, shuffle=False,
                                                    collate_fn=dataset_utils.batch_encode)
-                self.train(dataloader=train_dataloader, data_length=data_length)
+                self.train(dataloader=train_dataloader, datasets=datasets, data_length=data_length)
         elif self.type == "multitask":
             self.logger.info("Training multi-task model on all datasets")
             train_dataloader = data.DataLoader(get_continuum(data), batch_size=self.mini_batch_size, shuffle=True,
                                                collate_fn=dataset_utils.batch_encode)
-            self.train(dataloader=train_dataloader)
+            self.train(dataloader=train_dataloader, datasets=datasets)
         elif self.type == "single":
             # train on a single task / dataset
             self.logger.info(f"Training single model on dataset {self.config.learner.dataset}")
             train_dataloader = data.DataLoader(get_continuum(train_datasets, order=[self.config.learner.dataset]),
                                                batch_size=self.mini_batch_size, shuffle=True,
                                                collate_fn=dataset_utils.batch_encode)
-            self.train(dataloader=train_dataloader)
+            self.train(dataloader=train_dataloader, datasets=datasets)
         elif self.type == "alternating":
             order, n_samples = alternating_order(train_datasets, tasks=self.config.learner.data.alternating_tasks,
                                                  n_samples_per_switch=self.config.learner.data.alternating_n_samples_per_switch,
@@ -65,11 +66,13 @@ class Baseline(Learner):
             dataset = get_continuum(train_datasets, order=order, n_samples=n_samples)
             train_dataloader = data.DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False,
                                                collate_fn=dataset_utils.batch_encode)
-            self.train(dataloader=train_dataloader)
+            self.train(dataloader=train_dataloader, datasets=datasets)
         else:
             raise ValueError("Invalid training mode")
 
-    def train(self, dataloader, data_length=None):
+    def train(self, dataloader=None, datasets=None, data_length=None):
+        val_datasets = datasets_dict(datasets["val"], datasets["order"])
+
         self.model.train()
         if data_length is None:
             data_length = len(dataloader) * self.n_epochs
@@ -106,12 +109,17 @@ class Baseline(Learner):
                             "recall": rec,
                             "f1": f1,
                             "loss": np.mean(all_losses),
-                            "examples_seen": (self.current_iter + 1) * self.mini_batch_size
+                            "examples_seen": self.examples_seen()
                         })
                     all_losses, all_predictions, all_labels = [], [], []
                     self.start_time = time.time()
+                if self.current_iter % self.validate_freq == 0:
+                    self.validate(val_datasets, n_samples=self.config.training.n_validation_samples)
                 self.time_checkpoint()
                 self.current_iter += 1
+
+    def examples_seen(self):
+        return (self.current_iter + 1) * self.mini_batch_size
 
     def testing(self, datasets, order):
         """

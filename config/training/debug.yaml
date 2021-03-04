@@ -1,8 +1,10 @@
 training:
   device: 'cpu'
   epochs: 1 # number of epochs
-  log_freq: 50
+  log_freq: 1
+  validate_freq: 1
   batch_size: 1
+  n_validation_samples: 1
 
 data:
   max_length: 10

@@ -22,7 +22,7 @@ import hydra
 from omegaconf import DictConfig
 import wandb
 
-from LearningToRelearn.datasets.text_classification_dataset import get_datasets
+from LearningToRelearn.datasets.text_classification_dataset import get_datasets, ClassificationDataset
 from LearningToRelearn.datasets.utils import batch_encode
 
 # plt.style.use("seaborn-paper")
@@ -77,7 +77,7 @@ class Learner:
         # Experiment output directory
         self.exp_dir = Path(experiment_path)
 
-        # Checkpoint directory to save models        
+        # Checkpoint directory to save models
         self.checkpoint_dir = self.exp_dir / CHECKPOINTS
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         checkpoint_exists = len(list(self.checkpoint_dir.glob("*"))) > 0
@@ -114,6 +114,7 @@ class Learner:
         # Init trackers
         self.current_iter = 0
         self.current_epoch = 0
+        self._examples_seen = 0
         self.best_accuracy = 0.
         self.best_loss = float("inf")
 
@@ -121,6 +122,7 @@ class Learner:
         self.logger.info(f"Using device: {self.config.training.device}")
         self.mini_batch_size = config.training.batch_size
         self.log_freq = config.training.log_freq
+        self.validate_freq = config.training.validate_freq
 
         self.start_time = time.time()
         self.last_checkpoint_time = self.start_time
@@ -129,8 +131,44 @@ class Learner:
         #     self.logger.info(f"Loading model checkpoint from {last_checkpoint}")
         #     self.load_checkpoint(last_checkpoint.name)
 
+        # this is used to track metrics of different tasks during training
+        self.metrics = collections.defaultdict(dict)
+
+
+    def validate(self, datasets, n_samples=100):
+        """
+        Evaluate model performance on a validation set.
+        
+        Can be called throughout the course of training. Writes results
+        to the learner's attribute `self.metrics`.
+
+        Parameters
+        ---
+        datasets: Dict[str, Dataset]
+            Maps task to a validation dataset.
+        """
+        to_log = {"examples_seen": self.examples_seen()}
+        for task, dataset in datasets.items():
+            subset = ClassificationDataset(name=task, data=datasets[task].data.sample(n_samples))
+            dl = DataLoader(subset, batch_size=16)
+            performance = self.evaluate(dl)
+            if "steps" not in self.metrics[task]:
+                self.metrics[task]["steps"] = []
+            self.metrics[task]["steps"].append({
+                "performance": performance,
+                "examples_seen": self.examples_seen()
+            })
+            to_log[task + "_" + "train_val_acc"] = performance["accuracy"]
+        if self.config.wandb:
+            wandb.log(to_log)
+
+
+
     def testing(self, datasets, **kwargs):
         """
+        Evaluate Continual Learning method by evaluating on all tasks after the model
+        has trained on all available data. 
+
         Parameters
         ---
         datasets: List[Dataset]
@@ -297,6 +335,8 @@ class Learner:
             last_model_ix = np.lexsort((steps, epochs))[-1]
             return paths[last_model_ix]
 
+    def examples_seen():
+        return self._examples_seen
 
 def flatten_dict(d, parent_key='', sep='_'):
     items = []
@@ -331,3 +371,4 @@ def update_experiment_ids(config):
             experiment_ids_df = experiment_ids_df.append(experiment_id, ignore_index=True)
         experiment_ids_df.to_csv(EXPERIMENT_IDS, index=False)
         return experiment_id
+
