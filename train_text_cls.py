@@ -17,13 +17,14 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 
 from LearningToRelearn.datasets.text_classification_dataset import get_datasets
-from LearningToRelearn.learner import EXPERIMENT_DIR, flatten_dict
-from LearningToRelearn.models.cls_agem import AGEM
-from LearningToRelearn.models.cls_anml import ANML
-from LearningToRelearn.models.cls_baseline import Baseline
-from LearningToRelearn.models.cls_maml import MAML
-from LearningToRelearn.models.cls_oml import OML
-from LearningToRelearn.models.cls_replay import Replay
+from LearningToRelearn.learner import EXPERIMENT_DIR, METRICS_FILE, flatten_dict
+from LearningToRelearn.models.agem import AGEM
+from LearningToRelearn.models.anml import ANML
+from LearningToRelearn.models.baseline import Baseline
+from LearningToRelearn.models.maml import MAML
+from LearningToRelearn.models.oml import OML
+from LearningToRelearn.models.replay import Replay
+from LearningToRelearn.models.relearning import Relearner
 
 RESULTS_FILE = Path(hydra.utils.to_absolute_path("results.csv"))
 
@@ -46,6 +47,8 @@ def get_learner(config, **kwargs):
         learner = OML(config, **kwargs)
     elif config.learner.type == "anml":
         learner = ANML(config, **kwargs)
+    elif config.learner.type == "relearning":
+        learner = Relearner(config, **kwargs)
     else:
         raise NotImplementedError
     return learner
@@ -69,11 +72,10 @@ def main(config):
     # to load a checkpoint and perform inference, add +evaluate=<dir_of_experiment>
     if "evaluate" not in config: 
         learner = get_learner(config)
-        datasets = get_datasets(learner.data_dir, config.data.order, debug=config.debug)
+        datasets = get_datasets(learner.data_dir, config.data.order, debug=config.debug_data)
         learner.training(datasets)
-        with open(learner.results_dir / "metrics.json", "w") as f:
+        with open(learner.results_dir / METRICS_FILE, "w") as f:
             json.dump(learner.metrics, f)
-
         learner.save_checkpoint()
     else:
         # no training, just evaluate
@@ -83,7 +85,7 @@ def main(config):
         config.wandb = False
         learner = get_learner(config, experiment_path=experiment_path)
         learner.load_checkpoint()
-        datasets = get_datasets(learner.data_dir, config.data.order, debug=config.debug)
+        datasets = get_datasets(learner.data_dir, config.data.order, debug=config.debug_data)
 
     # validation set
     logger.info("----------Validation starts here----------")
