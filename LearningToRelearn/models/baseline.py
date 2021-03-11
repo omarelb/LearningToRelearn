@@ -60,28 +60,26 @@ class Baseline(Learner):
                                                collate_fn=dataset_utils.batch_encode)
             self.train(dataloader=train_dataloader, datasets=datasets)
         elif self.type == "alternating":
-            order, n_samples = alternating_order(train_datasets, tasks=self.config.learner.data.alternating_tasks,
-                                                 n_samples_per_switch=self.config.learner.data.alternating_n_samples_per_switch,
-                                                 relative_frequencies=self.config.learner.data.alternating_relative_frequencies)
+            order, n_samples = alternating_order(train_datasets, tasks=self.config.data.alternating_tasks,
+                                                 n_samples_per_switch=self.config.data.alternating_n_samples_per_switch,
+                                                 relative_frequencies=self.config.data.alternating_relative_frequencies)
             dataset = get_continuum(train_datasets, order=order, n_samples=n_samples)
             train_dataloader = data.DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False,
                                                collate_fn=dataset_utils.batch_encode)
             self.train(dataloader=train_dataloader, datasets=datasets)
-        elif self.type == "relearning":
-            pass
         else:
             raise ValueError("Invalid training mode")
 
     def train(self, dataloader=None, datasets=None, data_length=None):
         val_datasets = datasets_dict(datasets["val"], datasets["order"])
 
-        self.model.train()
         if data_length is None:
             data_length = len(dataloader) * self.n_epochs
         for epoch in range(self.n_epochs):
             all_losses, all_predictions, all_labels = [], [], []
 
             for text, labels in dataloader:
+                self.model.train()
                 labels = torch.tensor(labels).to(self.device)
                 input_dict = self.model.encode_text(text)
                 output = self.model(input_dict)
