@@ -1,0 +1,10 @@
+# @package _group_
+type: relearning # sequential learning
+lr: 0.00003 # learning rate
+relearning_task: dbpedia
+n_samples_slope: 250 # number of samples to take slope measurement over.
+n_samples_saturated_patience: 500 # number of samples patience before a task is considered saturated
+saturated_threshold: 0.002 # if slope is under this value, consider not improved
+relative_performance_threshold_lower: 0.5 # lower bound for relative performance of relearning task to switch tasks
+relative_performance_threshold_upper: 0.99 # upper bound for relative performance of relearning task to switch tasks
+smooth_alpha: 0.3 # alpha to use when calculating exponentially weighted moving average

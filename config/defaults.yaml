@@ -11,6 +11,11 @@ learner:
   meta_lr: 1e-5
   model_name: bert
 
+data:
+  alternating_tasks: # Which tasks to alternate between. If none, uses all tasks
+  alternating_n_samples_per_switch: 80 # How many samples to use at each switch.
+  alternating_relative_frequencies: # How much each task is seen compared to others.
+
 seed: 42 # random seed
 inference: false
 version: 0
@@ -26,7 +31,8 @@ save_freq: 60 # in minutes, specifies how often a model is saved
 wandb: true # whether to use weights and biases for logging
 # set to debug mode.
 # some extra logging is done, and a small dataset is used
-debug: false 
+debug_logging: true # log debug things
+debug_data: false # use a small dataset
 name: # experiment name, not specified by default, making it None
 
 hydra:
