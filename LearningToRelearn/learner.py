@@ -31,6 +31,7 @@ LOGS = Path("tensorboard-logs/")
 RESULTS = Path("results")
 EXPERIMENT_DIR = Path("experiments")
 EXPERIMENT_IDS = Path(hydra.utils.to_absolute_path("experiment_ids.csv"))
+METRICS_FILE = "metrics.json"
 BEST_MODEL_FNAME = "best-model.pt"
 
 
@@ -93,7 +94,7 @@ class Learner:
         self.results_dir = self.exp_dir / RESULTS
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
-        if config.debug:
+        if config.debug_logging:
             self.logger.setLevel(logging.DEBUG)
         self.logger.info("-"*50)
         self.logger.info("TRAINING LOG")
@@ -123,6 +124,7 @@ class Learner:
         self.mini_batch_size = config.training.batch_size
         self.log_freq = config.training.log_freq
         self.validate_freq = config.training.validate_freq
+        self.type = config.learner.type
 
         self.start_time = time.time()
         self.last_checkpoint_time = self.start_time
@@ -133,11 +135,15 @@ class Learner:
 
         # this is used to track metrics of different tasks during training
         self.metrics = collections.defaultdict(dict)
+        # specifies which task the learner is currently learning
+        # it is up to the specific learner to update this
+        self.previous_task = None
+        self.current_task = None
 
 
-    def validate(self, datasets, n_samples=100):
+    def validate(self, datasets, n_samples=100, log=True):
         """
-        Evaluate model performance on a validation set.
+        Evaluate model performance on a dataset.
         
         Can be called throughout the course of training. Writes results
         to the learner's attribute `self.metrics`.
@@ -146,23 +152,27 @@ class Learner:
         ---
         datasets: Dict[str, Dataset]
             Maps task to a validation dataset.
+        log: bool
+            If true, log to metrics attribute and wandb
         """
         to_log = {"examples_seen": self.examples_seen()}
+        result = {}
         for task, dataset in datasets.items():
             subset = ClassificationDataset(name=task, data=datasets[task].data.sample(n_samples))
-            dl = DataLoader(subset, batch_size=16)
+            dl = DataLoader(subset, batch_size=self.mini_batch_size)
             performance = self.evaluate(dl)
-            if "steps" not in self.metrics[task]:
-                self.metrics[task]["steps"] = []
-            self.metrics[task]["steps"].append({
-                "performance": performance,
-                "examples_seen": self.examples_seen()
-            })
+            result[task] = performance
+            if log:
+                if "performance" not in self.metrics[task]:
+                    self.metrics[task]["performance"] = []
+                self.metrics[task]["performance"].append({
+                    "performance": performance,
+                    "examples_seen": self.examples_seen()
+                })
             to_log[task + "_" + "train_val_acc"] = performance["accuracy"]
         if self.config.wandb:
             wandb.log(to_log)
-
-
+        return result
 
     def testing(self, datasets, **kwargs):
         """
@@ -179,8 +189,9 @@ class Learner:
         for dataset in datasets:
             dataset_name = dataset.__class__.__name__
             self.logger.info("Testing on {}".format(dataset_name))
-            test_dataloader = DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False,
-                                         collate_fn=batch_encode)
+            # test_dataloader = DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False,
+            #                              collate_fn=batch_encode)
+            test_dataloader = DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False)
             dataset_results = self.evaluate(dataloader=test_dataloader, **kwargs)
             accuracies.append(dataset_results["accuracy"])
             precisions.append(dataset_results["precision"])

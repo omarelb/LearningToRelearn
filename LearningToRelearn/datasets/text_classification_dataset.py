@@ -147,7 +147,6 @@ class ClassificationDataset(data.Dataset):
                 # load file
                 self.data = pd.read_csv(cache_file)
         else:
-            # TODO: add debug mode
             self.data = self.read_data(file_path)
             if reduce:
                 train_size = MAX_DEBUG_SIZE if debug else MAX_TRAIN_SIZE
