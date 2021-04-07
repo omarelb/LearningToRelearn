@@ -161,7 +161,7 @@ class Relearner(Learner):
                         self.metrics[self.relearning_task]["performance"].append([])
                         self.not_improving = 0
                         if self.first_encounter:
-                            self.logger.info(f"\n-----------FIRST ENCOUNTER RELEARNING TASK '{self.relearning_task}' FINISHED.----------\n")
+                            self.logger.info(f"-----------FIRST ENCOUNTER RELEARNING TASK '{self.relearning_task}' FINISHED.----------\n")
                         self.first_encounter = False
                         self.logger.info("TRAINING ON OTHER TASKS")
                         self.train(dataloader=self.dataloaders[OTHER_TASKS], datasets=datasets)
@@ -169,6 +169,10 @@ class Relearner(Learner):
                     # calculate relative performance relearning task
                     # if it reaches some threshold, train on relearning task again
                     # TODO: make performance measure attribute of relearner 
+                    # TODO: use moving average for relative performance check
+                    # TODO: allow different task ordering
+                    # TODO: measure forgetting
+                    # TODO: look at adaptive mini batch size => smaller batch size when re encountering
                     if relearning_task_relative_performance <= self.relative_performance_threshold_lower:
                         self.logger.info(f"Relative performance on relearning task {self.relearning_task} below threshold. Evaluating relearning..")
                         # this needs to be done because we want a fresh list of performances when we start
@@ -343,9 +347,8 @@ class Relearner(Learner):
                 relearning_metrics[f"relearning_slope_alpha_{alpha}"] = relearning_slope_alpha
                 relearning_metrics[f"relearning_sample_alpha_{alpha}"] = relearning_sample_alpha
                 self.logger.info("Relearning metrics:")
-                self.logger.info("------------------")
-                self.logger.info(f"relearning_slope_alpha_{alpha}: {relearning_slope_alpha}")
-                self.logger.info(f"relearning_sample_alpha_{alpha}: {relearning_sample_alpha}")
+                self.logger.info(f"\trelearning_slope_alpha_{alpha}: {relearning_slope_alpha}")
+                self.logger.info(f"\trelearning_sample_alpha_{alpha}: {relearning_sample_alpha}\n")
 
         self.metrics[self.relearning_task]["relearning"].append(relearning_metrics)
         if self.config.wandb:

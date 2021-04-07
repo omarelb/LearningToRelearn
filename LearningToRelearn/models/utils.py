@@ -2,13 +2,6 @@ import torch
 import numpy as np
 from sklearn import metrics
 
-# from LearningToRelearn.models.cls_baseline import Baseline 
-# from LearningToRelearn.models.cls_agem import AGEM 
-# from LearningToRelearn.models.cls_anml import ANML 
-# from LearningToRelearn.models.cls_maml import MAML
-# from LearningToRelearn.models.cls_oml import OML 
-# from LearningToRelearn.models.cls_replay import Replay 
-
 def calculate_metrics(predictions, labels, binary=False):
     averaging = "binary" if binary else "macro"
     predictions = np.array(predictions)
