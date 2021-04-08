@@ -6,5 +6,8 @@ training:
   batch_size: 2
   n_validation_samples: 8
 
+learner:
+  model_name: distilbert-base-uncased
+
 data:
   max_length: 10

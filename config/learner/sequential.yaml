@@ -1,3 +1,4 @@
-# @package _group_
-type: sequential # sequential learning
-lr: 0.00003 # learning rate
+learner:
+  type: sequential # sequential learning
+  lr: 0.00003 # learning rate
+  samples_per_task: # default None, which uses all data of each task

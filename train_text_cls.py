@@ -25,6 +25,7 @@ from LearningToRelearn.models.maml import MAML
 from LearningToRelearn.models.oml import OML
 from LearningToRelearn.models.replay import Replay
 from LearningToRelearn.models.relearning import Relearner
+from LearningToRelearn.models.basic_memory import BasicMemory
 
 RESULTS_FILE = Path(hydra.utils.to_absolute_path("results.csv"))
 
@@ -49,6 +50,8 @@ def get_learner(config, **kwargs):
         learner = ANML(config, **kwargs)
     elif config.learner.type == "relearning":
         learner = Relearner(config, **kwargs)
+    elif config.learner.type == "basic_memory":
+        learner = BasicMemory(config, **kwargs)
     else:
         raise NotImplementedError
     return learner

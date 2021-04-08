@@ -1,0 +1,7 @@
+learner:
+  type: basic_memory # multitask learning
+  lr: 0.00003 # learning rate
+  key_dim: 768
+  n_neighbours: 5
+  memory_size: 10000
+
