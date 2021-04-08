@@ -9,7 +9,7 @@ defaults:
 learner:
   inner_lr: 1e-3
   meta_lr: 1e-5
-  model_name: bert
+  model_name: bert-base-uncased
 
 data:
   alternating_tasks: # Which tasks to alternate between. If none, uses all tasks
