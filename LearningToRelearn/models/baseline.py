@@ -1,4 +1,3 @@
-import logging
 import time
 
 import numpy as np
@@ -39,33 +38,32 @@ class Baseline(Learner):
     def training(self, datasets, **kwargs):
         # train_datasets = {dataset_name: dataset for dataset_name, dataset in zip(datasets["order"], datasets["train"])}
         train_datasets = datasets_dict(datasets["train"], datasets["order"])
+        samples_per_task = self.config.learner.samples_per_task
 
         if self.type == "sequential":
+            n_samples = [samples_per_task] * len(train_datasets) if samples_per_task is not None else samples_per_task
             data_length = sum([len(train_dataset) for train_dataset in train_datasets.values()]) // self.mini_batch_size
-            for train_dataset in get_continuum(train_datasets, order=datasets["order"], merge=False):
+            for train_dataset in get_continuum(train_datasets, order=datasets["order"],
+                                               n_samples=n_samples, merge=False):
                 self.logger.info("Training on {}".format(train_dataset.__class__.__name__))
-                train_dataloader = data.DataLoader(train_dataset, batch_size=self.mini_batch_size, shuffle=False,
-                                                   collate_fn=dataset_utils.batch_encode)
+                train_dataloader = data.DataLoader(train_dataset, batch_size=self.mini_batch_size, shuffle=False)
                 self.train(dataloader=train_dataloader, datasets=datasets, data_length=data_length)
         elif self.type == "multitask":
             self.logger.info("Training multi-task model on all datasets")
-            train_dataloader = data.DataLoader(get_continuum(data), batch_size=self.mini_batch_size, shuffle=True,
-                                               collate_fn=dataset_utils.batch_encode)
+            train_dataloader = data.DataLoader(get_continuum(data), batch_size=self.mini_batch_size, shuffle=True)
             self.train(dataloader=train_dataloader, datasets=datasets)
         elif self.type == "single":
             # train on a single task / dataset
             self.logger.info(f"Training single model on dataset {self.config.learner.dataset}")
             train_dataloader = data.DataLoader(get_continuum(train_datasets, order=[self.config.learner.dataset]),
-                                               batch_size=self.mini_batch_size, shuffle=True,
-                                               collate_fn=dataset_utils.batch_encode)
+                                               batch_size=self.mini_batch_size, shuffle=True)
             self.train(dataloader=train_dataloader, datasets=datasets)
         elif self.type == "alternating":
             order, n_samples = alternating_order(train_datasets, tasks=self.config.data.alternating_tasks,
                                                  n_samples_per_switch=self.config.data.alternating_n_samples_per_switch,
                                                  relative_frequencies=self.config.data.alternating_relative_frequencies)
             dataset = get_continuum(train_datasets, order=order, n_samples=n_samples)
-            train_dataloader = data.DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False,
-                                               collate_fn=dataset_utils.batch_encode)
+            train_dataloader = data.DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False)
             self.train(dataloader=train_dataloader, datasets=datasets)
         else:
             raise ValueError("Invalid training mode")
@@ -78,7 +76,7 @@ class Baseline(Learner):
         for epoch in range(self.n_epochs):
             all_losses, all_predictions, all_labels = [], [], []
 
-            for text, labels in dataloader:
+            for text, labels, _ in dataloader:
                 self.model.train()
                 labels = torch.tensor(labels).to(self.device)
                 input_dict = self.model.encode_text(text)
@@ -139,8 +137,7 @@ class Baseline(Learner):
         for dataset in datasets:
             dataset_name = dataset.__class__.__name__
             self.logger.info("Testing on {}".format(dataset_name))
-            test_dataloader = data.DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False,
-                                         collate_fn=dataset_utils.batch_encode)
+            test_dataloader = data.DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False)
             dataset_results = self.evaluate(dataloader=test_dataloader)
             accuracies.append(dataset_results["accuracy"])
             precisions.append(dataset_results["precision"])
@@ -166,7 +163,7 @@ class Baseline(Learner):
 
         self.model.eval()
 
-        for i, (text, labels) in enumerate(dataloader):
+        for i, (text, labels, _) in enumerate(dataloader):
             labels = torch.tensor(labels).to(self.device)
             input_dict = self.model.encode_text(text)
             with torch.no_grad():
