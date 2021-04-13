@@ -10,7 +10,8 @@ import wandb
 
 import LearningToRelearn.datasets.utils as dataset_utils
 import LearningToRelearn.models.utils as model_utils
-from LearningToRelearn.models.base_models import TransformerRLN, TransformerClsModel, MemoryStore, LSTMDecoder,\
+from LearningToRelearn.models.base_models import TransformerRLN, TransformerClsModel, MemoryStore,\
+                                                 LSTMDecoder, SimpleDecoder,\
                                                  TRANSFORMER_HDIM
 from LearningToRelearn.learner import Learner
 from LearningToRelearn.datasets.text_classification_dataset import get_continuum, alternating_order, datasets_dict
@@ -42,7 +43,8 @@ class BasicMemory(Learner):
                                       max_length=config.data.max_length,
                                       device=self.device)
         self.logger.info("Loaded {} as model".format(self.encoder.__class__.__name__))
-        self.decoder = LSTMDecoder(key_size=config.learner.key_dim, embedding_size=TRANSFORMER_HDIM).to(self.device)
+        # self.decoder = LSTMDecoder(key_size=config.learner.key_dim, embedding_size=TRANSFORMER_HDIM).to(self.device)
+        self.decoder = SimpleDecoder(key_size=config.learner.key_dim, embedding_size=TRANSFORMER_HDIM).to(self.device)
         # self.key_encoder = nn.Linear(TRANSFORMER_HDIM, self.key_dim).to(self.device)
         # self.key_decoder = nn.Linear(self.key_dim, TRANSFORMER_HDIM).to(self.device)
         # self.decoder = lambda x, y: x
@@ -58,7 +60,7 @@ class BasicMemory(Learner):
         #                         lr=self.lr)
         self.optimizer = AdamW([p for p in
                                 itertools.chain(self.encoder.parameters(),
-                                                self.decoder.parameters(),
+                                                # self.decoder.parameters(),
                                                 self.classifier.parameters()) 
                                 if p.requires_grad],
                                 lr=self.lr)
@@ -75,7 +77,7 @@ class BasicMemory(Learner):
         logits = self.classifier(prediction_embedding)
         key_logits = self.key_classifier(key_embedding)
 
-        self.memory.add_entry(embeddings=key_embedding, labels=labels, query_result=query_result)
+        self.memory.add_entry(embeddings=key_embedding.detach(), labels=labels, query_result=query_result)
 
         return logits, key_logits
 
@@ -111,7 +113,6 @@ class BasicMemory(Learner):
             self.logger.debug(f"Loss: {loss}")
             # self.logger.debug(f"Key Loss: {key_loss}")
             pred = model_utils.make_prediction(logits.detach())
-            
 
             all_losses.append(loss)
             all_key_losses.append(key_loss)
