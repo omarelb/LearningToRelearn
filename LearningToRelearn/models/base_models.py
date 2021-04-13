@@ -326,4 +326,5 @@ class SimpleDecoder(nn.Module):
         neighbours = torch.cat((query_result["embedding"], query_result["label"].unsqueeze(-1)), dim=-1)
         neighbours_mean = neighbours.mean(dim=1)
         concatenation = torch.cat((neighbours_mean, embedding), dim=-1)
+        concatenation = torch.cat((torch.zeros_like(neighbours_mean), embedding), dim=-1)
         return self.decoder(concatenation)

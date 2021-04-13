@@ -19,6 +19,10 @@ from LearningToRelearn.datasets.text_classification_dataset import get_continuum
 # logging.basicConfig(level="INFO", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 # logger = logging.getLogger("Baseline-Log")
 
+DECODER_MAP = {
+    'lstm': LSTMDecoder,
+    'simple': SimpleDecoder
+}
 
 class BasicMemory(Learner):
     def __init__(self, config, **kwargs):
@@ -26,6 +30,8 @@ class BasicMemory(Learner):
         Baseline models: sequential and multitask setup.
         """
         super().__init__(config, **kwargs)
+        self.metrics["online"] = []
+
         self.lr = config.learner.lr
         self.type = config.learner.type
         self.n_epochs = config.training.epochs
@@ -44,7 +50,8 @@ class BasicMemory(Learner):
                                       device=self.device)
         self.logger.info("Loaded {} as model".format(self.encoder.__class__.__name__))
         # self.decoder = LSTMDecoder(key_size=config.learner.key_dim, embedding_size=TRANSFORMER_HDIM).to(self.device)
-        self.decoder = SimpleDecoder(key_size=config.learner.key_dim, embedding_size=TRANSFORMER_HDIM).to(self.device)
+        decoder = DECODER_MAP[config.learner.decoder]
+        self.decoder = decoder(key_size=config.learner.key_dim, embedding_size=TRANSFORMER_HDIM).to(self.device)
         # self.key_encoder = nn.Linear(TRANSFORMER_HDIM, self.key_dim).to(self.device)
         # self.key_decoder = nn.Linear(self.key_dim, TRANSFORMER_HDIM).to(self.device)
         # self.decoder = lambda x, y: x
@@ -60,24 +67,33 @@ class BasicMemory(Learner):
         #                         lr=self.lr)
         self.optimizer = AdamW([p for p in
                                 itertools.chain(self.encoder.parameters(),
-                                                # self.decoder.parameters(),
+                                                self.decoder.parameters(),
                                                 self.classifier.parameters()) 
                                 if p.requires_grad],
                                 lr=self.lr)
 
-    def forward(self, text, labels):
+    def forward(self, text, labels, update_memory=True):
+        """
+        Forward pass using memory architecture.
+
+        Parameters
+        ---
+        text
+        labels
+        update_memory: bool
+            If false, don't update memory data
+        """
         input_dict = self.encoder.encode_text(text)
         text_embedding = self.encoder(input_dict)
         key_embedding = self.key_encoder(text_embedding)
 
         query_result = self.memory.query(key_embedding, self.n_neighbours)
-        if query_result is not None:
-            self.logger.debug(f"Shape of neighbour embeddings: {query_result['embedding'].shape}")
         prediction_embedding = self.decoder(text_embedding, query_result)
         logits = self.classifier(prediction_embedding)
         key_logits = self.key_classifier(key_embedding)
 
-        self.memory.add_entry(embeddings=key_embedding.detach(), labels=labels, query_result=query_result)
+        if update_memory:
+            self.memory.add_entry(embeddings=key_embedding.detach(), labels=labels, query_result=query_result)
 
         return logits, key_logits
 
@@ -96,6 +112,7 @@ class BasicMemory(Learner):
         for text, labels, datasets in dataloader:
             self.encoder.train()
             labels = torch.tensor(labels).to(self.device)
+            task = datasets[0]
 
             logits, key_logits = self.forward(text, labels)
             # compute losses
@@ -119,8 +136,13 @@ class BasicMemory(Learner):
             all_predictions.extend(pred.tolist())
             all_labels.extend(labels.tolist())
 
+            acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
+            self.metrics["online"].append({
+                "accuracy": acc,
+                "examples_seen": self.examples_seen(),
+                "task": task
+            })
             if self.current_iter % self.log_freq == 0:
-                acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
                 time_per_iteration, estimated_time_left = self.time_metrics(data_length)
                 self.logger.info(
                     "Iteration {}/{} ({:.2f}%) -- {:.3f} (sec/it) -- Time Left: {}\nMetrics: Loss = {:.4f}, key loss: {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
@@ -199,7 +221,7 @@ class BasicMemory(Learner):
         for i, (text, labels, datasets) in enumerate(dataloader):
             labels = torch.tensor(labels).to(self.device)
             with torch.no_grad():
-                logits, key_logits = self.forward(text, labels)
+                logits, key_logits = self.forward(text, labels, update_memory=False)
                 loss = self.loss_fn(logits, labels)
             loss = loss.item()
             pred = model_utils.make_prediction(logits.detach())
