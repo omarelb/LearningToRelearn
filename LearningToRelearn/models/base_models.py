@@ -282,8 +282,13 @@ class LSTMDecoder(nn.Module):
     Returns representation after decoding which can be used for classification.
     """
     def __init__(self, key_size, embedding_size):
+        """
+        Parameters
+        ---
+        key_size: size of memory keys after going through the key decoder
+        embedding_size: size of query embedding
+        """
         super().__init__()
-        self.decoder = nn.Linear(key_size, embedding_size)
         # + 1 for label
         self.lstm = nn.LSTM(input_size=key_size + 1, hidden_size=embedding_size, batch_first=True)
     
@@ -298,17 +303,27 @@ class LSTMDecoder(nn.Module):
             (BATCH_SIZE, N_NEIGHBOURS, EMBEDDING_DIM) and BATCH_SIZE respectively.
         """
         # concatenate neighbour embeddings and labels
-        if query_results is None:
+        if query_result is None:
             return embedding
+        # shape (batch, seq_len, input_size)
         neighbours = torch.cat((query_result["embedding"], query_result["label"].unsqueeze(-1)), dim=-1)
-        h_0 = embedding.unsqueeze(0) # for LSTM API
+        h_0 = embedding.unsqueeze(0).contiguous() # for LSTM API
         c_0 = torch.zeros_like(h_0)
         
         _, (h_n, _) = self.lstm(neighbours, (h_0, c_0))
         return h_n.squeeze(0)
 
 class SimpleDecoder(nn.Module):
+    def __init__(self, key_size, embedding_size):
+        super().__init__()
+        self.decoder = nn.Linear(key_size + 1 + embedding_size, embedding_size)
+
     def forward(self, embedding, query_result):
+        if query_result is None:
+            return embedding
         # mean over neighbours
         # todo: change to mean over embedding and neighbours instead of adding them
-        return query_result["embedding"].mean(dim=1) + embedding
+        neighbours = torch.cat((query_result["embedding"], query_result["label"].unsqueeze(-1)), dim=-1)
+        neighbours_mean = neighbours.mean(dim=1)
+        concatenation = torch.cat((neighbours_mean, embedding), dim=-1)
+        return self.decoder(concatenation)
