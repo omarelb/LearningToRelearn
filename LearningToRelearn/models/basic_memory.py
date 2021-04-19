@@ -161,6 +161,7 @@ class BasicMemory(Learner):
                     })
                 all_losses, all_key_losses, all_predictions, all_labels = [], [], [], []
                 self.start_time = time.time()
+                self.write_metrics()
             if self.current_iter % self.validate_freq == 0:
                 self.validate(val_datasets, n_samples=self.config.training.n_validation_samples)
             self.time_checkpoint()

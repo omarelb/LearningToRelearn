@@ -76,24 +76,32 @@ class Baseline(Learner):
         for epoch in range(self.n_epochs):
             all_losses, all_predictions, all_labels = [], [], []
 
-            for text, labels, _ in dataloader:
+            for text, labels, datasets in dataloader:
                 self.model.train()
                 labels = torch.tensor(labels).to(self.device)
+                task = datasets[0]
+
                 input_dict = self.model.encode_text(text)
                 output = self.model(input_dict)
                 loss = self.loss_fn(output, labels)
+
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
                 loss = loss.item()
-                self.logger.debug(f"Loss: {loss}")
+
                 pred = model_utils.make_prediction(output.detach())
                 all_losses.append(loss)
                 all_predictions.extend(pred.tolist())
                 all_labels.extend(labels.tolist())
 
+                acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
+                self.metrics["online"].append({
+                    "accuracy": acc,
+                    "examples_seen": self.examples_seen(),
+                    "task": task
+                })
                 if self.current_iter % self.log_freq == 0:
-                    acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
                     time_per_iteration, estimated_time_left = self.time_metrics(data_length)
                     self.logger.info(
                         "Iteration {}/{} ({:.2f}%) -- {:.3f} (sec/it) -- Time Left: {}\nMetrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
@@ -107,10 +115,12 @@ class Baseline(Learner):
                             "recall": rec,
                             "f1": f1,
                             "loss": np.mean(all_losses),
-                            "examples_seen": self.examples_seen()
+                            "examples_seen": self.examples_seen(),
+                            "task": task
                         })
                     all_losses, all_predictions, all_labels = [], [], []
                     self.start_time = time.time()
+                    self.write_metrics()
                 if self.current_iter % self.validate_freq == 0:
                     self.validate(val_datasets, n_samples=self.config.training.n_validation_samples)
                 self.time_checkpoint()
