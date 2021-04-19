@@ -8,6 +8,7 @@ import random
 import math
 import collections
 from filelock import FileLock
+import json
 
 import torch
 import numpy as np
@@ -28,7 +29,7 @@ from LearningToRelearn.datasets.utils import batch_encode
 # plt.style.use("seaborn-paper")
 CHECKPOINTS = Path("model-checkpoints/")
 LOGS = Path("tensorboard-logs/")
-RESULTS = Path("results")
+RESULTS_DIR = Path("results")
 EXPERIMENT_DIR = Path("experiments")
 EXPERIMENT_IDS = Path(hydra.utils.to_absolute_path("experiment_ids.csv"))
 METRICS_FILE = "metrics.json"
@@ -58,8 +59,15 @@ class Learner:
         self.config = config
         self.logger = logging.getLogger(__name__)
 
+        # experiment_path is only explicitly supplied during an evaluation run
+        if experiment_path is None:
+            experiment_path = os.getcwd() # hydra changes the runtime to the experiment folder
+        # Experiment output directory
+        self.exp_dir = Path(experiment_path)
+
         # weights and biases
         if config.wandb:
+            config["exp_dir"] = self.exp_dir
             if config.name is None:
                 config.name = "unnamed"
             experiment_id = update_experiment_ids(config)
@@ -72,11 +80,6 @@ class Learner:
                     self.logger.info("wandb initialization failed. Retrying..")
                     time.sleep(10)
 
-        # experiment_path is only explicitly supplied during an evaluation run
-        if experiment_path is None:
-            experiment_path = os.getcwd() # hydra changes the runtime to the experiment folder
-        # Experiment output directory
-        self.exp_dir = Path(experiment_path)
 
         # Checkpoint directory to save models
         self.checkpoint_dir = self.exp_dir / CHECKPOINTS
@@ -91,7 +94,7 @@ class Learner:
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
         # Test and evaluation results saved here
-        self.results_dir = self.exp_dir / RESULTS
+        self.results_dir = self.exp_dir / RESULTS_DIR
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
         if config.debug_logging:
@@ -347,8 +350,12 @@ class Learner:
             last_model_ix = np.lexsort((steps, epochs))[-1]
             return paths[last_model_ix]
 
-    def examples_seen():
+    def examples_seen(self):
         return self._examples_seen
+
+    def write_metrics(self):
+        with open(self.results_dir / METRICS_FILE, "w") as f:
+            json.dump(self.metrics, f)
 
 def flatten_dict(d, parent_key='', sep='_'):
     items = []

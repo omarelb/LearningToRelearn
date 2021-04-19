@@ -17,7 +17,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 
 from LearningToRelearn.datasets.text_classification_dataset import get_datasets
-from LearningToRelearn.learner import EXPERIMENT_DIR, METRICS_FILE, flatten_dict
+from LearningToRelearn.learner import EXPERIMENT_DIR, flatten_dict
 from LearningToRelearn.models.agem import AGEM
 from LearningToRelearn.models.anml import ANML
 from LearningToRelearn.models.baseline import Baseline
@@ -77,8 +77,7 @@ def main(config):
         learner = get_learner(config)
         datasets = get_datasets(learner.data_dir, config.data.order, debug=config.debug_data)
         learner.training(datasets)
-        with open(learner.results_dir / METRICS_FILE, "w") as f:
-            json.dump(learner.metrics, f)
+        learner.write_metrics()
         learner.save_checkpoint()
     else:
         # no training, just evaluate
