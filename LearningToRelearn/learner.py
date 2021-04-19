@@ -135,6 +135,7 @@ class Learner:
 
         # this is used to track metrics of different tasks during training
         self.metrics = collections.defaultdict(dict)
+        self.metrics["online"] = []
         # specifies which task the learner is currently learning
         # it is up to the specific learner to update this
         self.previous_task = None
