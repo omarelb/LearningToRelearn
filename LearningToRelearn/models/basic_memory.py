@@ -30,7 +30,6 @@ class BasicMemory(Learner):
         Baseline models: sequential and multitask setup.
         """
         super().__init__(config, **kwargs)
-        self.metrics["online"] = []
 
         self.lr = config.learner.lr
         self.type = config.learner.type
@@ -102,9 +101,10 @@ class BasicMemory(Learner):
         train_datasets = datasets_dict(datasets["train"], datasets["order"])
         val_datasets = datasets_dict(datasets["val"], datasets["order"])
 
-        dataset = get_continuum(train_datasets, order=datasets["order"], n_samples=[8000] * len(datasets["order"]))
+        dataset = get_continuum(train_datasets, order=datasets["order"], n_samples=[5000] * len(datasets["order"]))
 
         dataloader = data.DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False)
+        # relearning_dataloader = data.DataLoader(dataset, batch_size=1, shuffle=False)
         data_length = len(dataloader)
 
         all_losses, all_key_losses, all_predictions, all_labels = [], [], [], []
@@ -168,6 +168,7 @@ class BasicMemory(Learner):
 
     def examples_seen(self):
         return (self.current_iter + 1) * self.mini_batch_size
+
 
     def testing(self, datasets, order):
         """
