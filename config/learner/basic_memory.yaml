@@ -4,4 +4,4 @@ learner:
   key_dim: 768
   n_neighbours: 5
   memory_size: 10000
-
+  decoder: simple # one of {"simple, lstm"}
