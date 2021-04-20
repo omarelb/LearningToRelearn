@@ -61,7 +61,7 @@ class Learner:
 
         # experiment_path is only explicitly supplied during an evaluation run
         if experiment_path is None:
-            experiment_path = os.getcwd() # hydra changes the runtime to the experiment folder
+            experiment_path = os.getcwd()  # hydra changes the runtime to the experiment folder
         # Experiment output directory
         self.exp_dir = Path(experiment_path)
 
@@ -76,10 +76,9 @@ class Learner:
                     self.wandb_run = wandb.init(project="relearning", config=flatten_dict(config),
                                name=f"{experiment_id['name']}-{experiment_id['id']}", reinit=True)
                     break
-                except:
+                except Exception as e:
                     self.logger.info("wandb initialization failed. Retrying..")
                     time.sleep(10)
-
 
         # Checkpoint directory to save models
         self.checkpoint_dir = self.exp_dir / CHECKPOINTS
@@ -99,11 +98,11 @@ class Learner:
 
         if config.debug_logging:
             self.logger.setLevel(logging.DEBUG)
-        self.logger.info("-"*50)
+        self.logger.info("-" * 50)
         self.logger.info("TRAINING LOG")
-        self.logger.info("-"*50)
+        self.logger.info("-" * 50)
 
-        self.logger.info("-"*50 + "\n" + f"CONFIG:\n{self.config}\n" + "-"*50)
+        self.logger.info("-" * 50 + "\n" + f"CONFIG:\n{self.config}\n" + "-" * 50)
 
         # if checkpoint_exists:
         #     self.logger.info(f"Checkpoint for {self.exp_dir.name} ALREADY EXISTS. Continuing training.")
@@ -144,11 +143,10 @@ class Learner:
         self.previous_task = None
         self.current_task = None
 
-
     def validate(self, datasets, n_samples=100, log=True):
         """
         Evaluate model performance on a dataset.
-        
+
         Can be called throughout the course of training. Writes results
         to the learner's attribute `self.metrics`.
 
@@ -226,7 +224,6 @@ class Learner:
             replay_steps = 0
         return replay_freq, replay_steps
 
-
     def save_checkpoint(self, file_name: str = None):
         """Save checkpoint in the checkpoint directory.
 
@@ -293,9 +290,13 @@ class Learner:
             if self.config.save_optimizer_state:
                 self.load_optimizer_state(checkpoint)
             self.load_other_state_information(checkpoint)
-
         except OSError:
             self.logger.error(f"No checkpoint exists @ {self.checkpoint_dir}")
+        try:
+            with open(self.results_dir / METRICS_FILE) as f:
+                self.metrics = json.load(f)
+        except OSError:
+            self.logger.error("Failed loading metrics file")
 
     def model_state(self):
         return self.model.state_dict()
@@ -311,13 +312,13 @@ class Learner:
 
     def load_other_state_information(self, checkpoint):
         pass
-        
+
     def get_datasets(self, data_dir, order):
         return get_datasets(data_dir, order)
 
     def time_metrics(self, data_length):
         time_elapsed = time.time() - self.start_time
-        time_per_iteration = time_elapsed / self.log_freq # seconds per iteration
+        time_per_iteration = time_elapsed / self.log_freq  # seconds per iteration
         estimated_time_left = time.strftime('%H:%M:%S', time.gmtime(time_per_iteration * (data_length - (self.current_iter + 1))))
         return time_per_iteration, estimated_time_left
 
@@ -330,7 +331,6 @@ class Learner:
             self.logger.info(f"{deltatime / 60:.1f} minutes have elapsed, saving checkpoint")
             self.save_checkpoint()
             self.last_checkpoint_time = curtime
-
 
     def get_last_checkpoint_path(self, checkpoint_dir=None):
         """Return path of the latest checkpoint in a given checkpoint directory."""
@@ -376,10 +376,10 @@ def update_experiment_ids(config):
     with lock:
         if not EXPERIMENT_IDS.exists():
             with open(EXPERIMENT_IDS, "w") as f:
-                f.write(f"name,id\n")
+                f.write("name,id\n")
                 f.write(f"{config.name}, 0\n")
         experiment_ids_df = pd.read_csv(EXPERIMENT_IDS)
-        in_data = (experiment_ids_df["name"] == config.name).any() # check if name is in experiments list
+        in_data = (experiment_ids_df["name"] == config.name).any()  # check if name is in experiments list
         if in_data:
             # increment counter for this experiment name to avoid duplicate names
             id = experiment_ids_df.loc[experiment_ids_df["name"] == config.name, "id"].values[0] + 1
@@ -390,4 +390,3 @@ def update_experiment_ids(config):
             experiment_ids_df = experiment_ids_df.append(experiment_id, ignore_index=True)
         experiment_ids_df.to_csv(EXPERIMENT_IDS, index=False)
         return experiment_id
-
