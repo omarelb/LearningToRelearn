@@ -91,23 +91,24 @@ def main(config):
 
     # validation set
     logger.info("----------Validation starts here----------")
-    results, mean_results = learner.testing(datasets["val"], order=datasets["order"])
-    mean_validation_results = {"validation_" + k : v for k, v in mean_results.items()}
-    pd.DataFrame.from_dict(results, orient="index").to_csv(learner.results_dir / "validation_results.csv")
+    learner.testing(datasets["val"], order=datasets["order"])
+    learner.write_metrics()
+    # mean_validation_results = {"validation_" + k : v for k, v in mean_results.items()}
+    # pd.DataFrame.from_dict(results, orient="index").to_csv(learner.results_dir / "validation_results.csv")
 
     # test set
-    logger.info("----------Testing starts here----------")
-    results, mean_results = learner.testing(datasets["test"], order=datasets["order"])
-    mean_test_results = {"test_" + k : v for k, v in mean_results.items()}
-    pd.DataFrame.from_dict(results, orient="index").to_csv(learner.results_dir / "test_results.csv")
+    # logger.info("----------Testing starts here----------")
+    # results, mean_results = learner.testing(datasets["test"], order=datasets["order"])
+    # mean_test_results = {"test_" + k : v for k, v in mean_results.items()}
+    # pd.DataFrame.from_dict(results, orient="index").to_csv(learner.results_dir / "test_results.csv")
 
     if config.wandb:
-        wandb.log(mean_validation_results)
-        wandb.log(mean_test_results)
+        # wandb.log(mean_validation_results)
+        # wandb.log(mean_test_results)
         learner.wandb_run.finish()
 
     # write results to a file
-    write_results(config, mean_validation_results, mean_test_results)
+    # write_results(config, mean_validation_results, mean_test_results)
 
 if __name__ == "__main__":
     main()

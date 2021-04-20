@@ -16,6 +16,14 @@ data:
   alternating_n_samples_per_switch: 80 # How many samples to use at each switch.
   alternating_relative_frequencies: # How much each task is seen compared to others.
 
+testing:
+  few_shot_batch_size: 1 # for few shot evaluation
+  average_accuracy: true # whether to compute average accuracy on all datasets
+  few_shot: true # whether to perform few shot evaluation
+  eval_dataset: yelp # which dataset to perform few shot evaluation on
+  n_samples: 32 # how many samples train on during few shot evaluation
+  validation_size: 100 # sample a subset so validation doesn't take too long during few shot evaluation
+
 seed: 42 # random seed
 inference: false
 version: 0
