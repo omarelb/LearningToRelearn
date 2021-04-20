@@ -11,7 +11,10 @@ def calculate_metrics(predictions, labels, binary=False):
     precision = metrics.precision_score(labels, predictions, average=averaging, labels=unique_labels, zero_division=0)
     recall = metrics.recall_score(labels, predictions, average=averaging, labels=unique_labels, zero_division=0)
     f1_score = metrics.f1_score(labels, predictions, average=averaging, labels=unique_labels, zero_division=0)
-    return accuracy, precision, recall, f1_score
+    return {"accuracy": accuracy,
+            "precision": precision, 
+            "recall": recall,
+            "f1_score": f1_score}
 
 
 def calculate_accuracy(predictions, labels):
@@ -28,23 +31,6 @@ def make_prediction(output):
         else:
             pred = output.max(-1)[1]
     return pred
-
-
-def make_rel_prediction(cosine_sim, ranking_label):
-    pred = []
-    with torch.no_grad():
-        pos_idx = [i for i, lbl in enumerate(ranking_label) if lbl == 1]
-        if len(pos_idx) == 1:
-            pred.append(torch.argmax(cosine_sim))
-        else:
-            for i in range(len(pos_idx) - 1):
-                start_idx = pos_idx[i]
-                end_idx = pos_idx[i+1]
-                subset = cosine_sim[start_idx: end_idx]
-                pred.append(torch.argmax(subset))
-    pred = torch.tensor(pred)
-    true_labels = torch.zeros_like(pred)
-    return pred, true_labels
 
 
 def ewma(series=None, prev_value=None, new_value=None, alpha=0.5):
