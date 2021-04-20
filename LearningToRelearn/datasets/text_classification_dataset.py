@@ -21,19 +21,19 @@ DATASET_SETTINGS = {
     "agnews": {
         "n_classes": 4,
         "path": "ag_news_csv"
-    }, # 0
+    },  # 0
     "amazon": {
         "n_classes": 5,
         "path": "amazon_review_full_csv"
-    }, # 1
+    },  # 1
     "yelp": {
         "n_classes": 5,
         "path": "yelp_review_full_csv"
-    }, # 2
+    },  # 2
     "dbpedia": {
         "n_classes": 14,
         "path": "dbpedia_csv"
-    }, # 3
+    },  # 3
     "yahoo": {
         "n_classes": 10,
         "path": "yahoo_answers_csv"
@@ -47,7 +47,6 @@ DATASET_ORDER_MAPPING = {
     3: ["yelp", "yahoo", "amazon", "dbpedia", "agnews"],
     4: ["agnews", "yelp", "amazon", "yahoo", "dbpedia"]
 }
-
 
 
 def preprocess(text):
@@ -144,8 +143,8 @@ class ClassificationDataset(data.Dataset):
         }[split]
         cache_file = cache_filename(file_path, split=split, debug=debug)
         if load_preprocessed_from_cache and cache_file.is_file():
-                # load file
-                self.data = pd.read_csv(cache_file)
+            # load file
+            self.data = pd.read_csv(cache_file)
         else:
             self.data = self.read_data(file_path)
             if reduce:
@@ -170,6 +169,12 @@ class ClassificationDataset(data.Dataset):
         """
         raise NotImplementedError(f"The method read_data should be implemented for subclass of {type(self)}")
 
+    def sample(self, n, **kwargs):
+        return ClassificationDataset(name=self.name, data=self.data.sample(n, **kwargs))
+
+    def new(self, ix_low, ix_high):
+        """Return new dataset with data given by indices"""
+        return ClassificationDataset(name=self.name, data=self.data.iloc[ix_low:ix_high])
 
     def __len__(self):
         return len(self.data)
@@ -235,11 +240,11 @@ class YahooAnswersDataset(ClassificationDataset):
 
 # this dict should stay in this position since it depends on the classes defined above, and is used in functions below
 DATASET_MAPPING = {
-    "agnews": AGNewsDataset, # 0
-    "amazon": AmazonDataset, # 1
-    "yelp": YelpDataset, # 2
-    "dbpedia": DBPediaDataset, # 3
-    "yahoo": YahooAnswersDataset # 4
+    "agnews": AGNewsDataset,  # 0
+    "amazon": AmazonDataset,  # 1
+    "yelp": YelpDataset,  # 2
+    "dbpedia": DBPediaDataset,  # 3
+    "yahoo": YahooAnswersDataset  # 4
 }
 
 
@@ -264,7 +269,7 @@ def get_datasets(data_path, data_order=1, debug=False):
     Load multiple datasets according to an order index, where the order
     is defined by DATASET_ORDER_MAPPING in this file.
     """
-    logging.info(f"Loading data...")
+    logging.info("Loading data...")
     train_datasets, val_datasets, test_datasets = [], [], []
     for dataset_id in DATASET_ORDER_MAPPING[data_order]:
         train_dataset, val_dataset, test_dataset = get_dataset(data_path, dataset_id, debug=debug)
@@ -327,7 +332,9 @@ def get_continuum(datasets, order=None, n_samples=None, shuffle=False, merge=Tru
     for dataset_name, n_sample in zip(order, n_samples):
         n_samples_per_task[dataset_name] += n_sample
         if n_samples_per_task[dataset_name] > data_lengths[dataset_name]:
-            raise AssertionError("The number of specified samples exceeds the number of samples in data, check n_samples")
+            raise AssertionError(
+                "The number of specified samples exceeds the number of samples in data, check n_samples"
+            )
     
     result = []
     permutation = list(range(len(order)))
