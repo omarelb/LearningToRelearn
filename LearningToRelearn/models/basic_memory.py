@@ -4,7 +4,7 @@ import time
 import numpy as np
 import torch
 from torch import nn
-from torch.utils import data
+from torch.utils.data import DataLoader
 from transformers import AdamW
 import wandb
 
@@ -54,8 +54,8 @@ class BasicMemory(Learner):
         # self.key_encoder = nn.Linear(TRANSFORMER_HDIM, self.key_dim).to(self.device)
         # self.key_decoder = nn.Linear(self.key_dim, TRANSFORMER_HDIM).to(self.device)
         # self.decoder = lambda x, y: x
-        self.key_encoder = lambda x: x # for now
-        self.key_decoder = lambda x: x # for now
+        self.key_encoder = lambda x: x  # for now
+        self.key_decoder = lambda x: x  # for now
         self.classifier = nn.Linear(TRANSFORMER_HDIM, config.data.n_classes).to(self.device)
         self.key_classifier = nn.Linear(self.key_dim, config.data.n_classes).to(self.device)
 
@@ -67,7 +67,7 @@ class BasicMemory(Learner):
         self.optimizer = AdamW([p for p in
                                 itertools.chain(self.encoder.parameters(),
                                                 self.decoder.parameters(),
-                                                self.classifier.parameters()) 
+                                                self.classifier.parameters())
                                 if p.requires_grad],
                                 lr=self.lr)
 
@@ -102,77 +102,84 @@ class BasicMemory(Learner):
         val_datasets = datasets_dict(datasets["val"], datasets["order"])
 
         dataset = get_continuum(train_datasets, order=datasets["order"], n_samples=[5000] * len(datasets["order"]))
-
-        dataloader = data.DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False)
-        # relearning_dataloader = data.DataLoader(dataset, batch_size=1, shuffle=False)
-        data_length = len(dataloader)
+        dataloader = DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False)
 
         all_losses, all_key_losses, all_predictions, all_labels = [], [], [], []
 
         for text, labels, datasets in dataloader:
-            self.encoder.train()
-            labels = torch.tensor(labels).to(self.device)
-            task = datasets[0]
-
-            logits, key_logits = self.forward(text, labels)
-            # compute losses
-            loss = self.loss_fn(logits, labels)
-            # key_loss = self.loss_fn(key_logits, labels)
-            # update here
-            
-            self.optimizer.zero_grad()
-            loss.backward()
-            # key_loss.backward()
-            self.optimizer.step()
-            loss = loss.item()
-            # key_loss = key_loss.item()
-            key_loss = 0
-            self.logger.debug(f"Loss: {loss}")
-            # self.logger.debug(f"Key Loss: {key_loss}")
-            pred = model_utils.make_prediction(logits.detach())
+            logits, loss, key_loss = self.training_step(text, labels)
+            predictions = model_utils.make_prediction(logits.detach())
 
             all_losses.append(loss)
             all_key_losses.append(key_loss)
-            all_predictions.extend(pred.tolist())
+            all_predictions.extend(predictions.tolist())
             all_labels.extend(labels.tolist())
-
-            acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
+            online_metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
             self.metrics["online"].append({
-                "accuracy": acc,
+                "accuracy": online_metrics["accuracy"],
                 "examples_seen": self.examples_seen(),
-                "task": task
+                "task": datasets[0]  # assumes whole batch is from same task
             })
             if self.current_iter % self.log_freq == 0:
-                time_per_iteration, estimated_time_left = self.time_metrics(data_length)
-                self.logger.info(
-                    "Iteration {}/{} ({:.2f}%) -- {:.3f} (sec/it) -- Time Left: {}\nMetrics: Loss = {:.4f}, key loss: {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
-                    "F1 score = {:.4f}".format(self.current_iter + 1, data_length, (self.current_iter + 1) / data_length * 100,
-                                            time_per_iteration, estimated_time_left,
-                                            np.mean(all_losses), np.mean(all_key_losses), acc, prec, rec, f1))
-                if self.config.wandb:
-                    wandb.log({
-                        "accuracy": acc,
-                        "precision": prec,
-                        "recall": rec,
-                        "f1": f1,
-                        "loss": np.mean(all_losses),
-                        "key_loss": np.mean(all_key_losses),
-                        "examples_seen": self.examples_seen()
-                    })
+                metrics = model_utils.calculate_metrics(all_predictions, all_labels)
+                self.log(metrics, all_losses, all_key_losses)
                 all_losses, all_key_losses, all_predictions, all_labels = [], [], [], []
-                self.start_time = time.time()
                 self.write_metrics()
             if self.current_iter % self.validate_freq == 0:
                 self.validate(val_datasets, n_samples=self.config.training.n_validation_samples)
-            self.time_checkpoint()
             self.current_iter += 1
+
+    def log(self, metrics, all_losses, all_key_losses):
+        """Log results during training to console and optionally other outputs
+
+        Parameters
+        ---
+        metrics: dict mapping metric names to their values
+        """
+        self.logger.info(
+            "Iteration {} - Metrics: Loss = {:.4f}, key loss: {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
+            "F1 score = {:.4f}".format(self.current_iter + 1,
+                                        np.mean(all_losses), np.mean(all_key_losses),
+                                        metrics["accuracy"], metrics["precision"], metrics["recall"], metrics["f1"]))
+        if self.config.wandb:
+            wandb.log({
+                "accuracy": metrics["accuracy"],
+                "precision": metrics["precision"],
+                "recall": metrics["recall"],
+                "f1": metrics["accuracy"],
+                "loss": np.mean(all_losses),
+                "key_loss": np.mean(all_key_losses),
+                "examples_seen": self.examples_seen()
+            })
+
+    def training_step(self, text, labels):
+        self.encoder.train()
+        labels = torch.tensor(labels).to(self.device)
+
+        logits, key_logits = self.forward(text, labels)
+        # compute losses
+        loss = self.loss_fn(logits, labels)
+        # key_loss = self.loss_fn(key_logits, labels)
+        # update here
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        # key_loss.backward()
+        self.optimizer.step()
+        loss = loss.item()
+        # key_loss = key_loss.item()
+        key_loss = 0
+        self.logger.debug(f"Loss: {loss}")
+        # self.logger.debug(f"Key Loss: {key_loss}")
+        return logits, loss, key_loss
 
     def examples_seen(self):
         return (self.current_iter + 1) * self.mini_batch_size
 
-
     def testing(self, datasets, order):
         """
+        Evaluate the learner after training.
+
         Parameters
         ---
         datasets: List[Dataset]
@@ -180,17 +187,67 @@ class BasicMemory(Learner):
         order: List[str]
             Specifies order of encountered datasets
         """
-        accuracies, precisions, recalls, f1s = [], [], [], []
+        self.set_eval()
+        testing_datasets = datasets_dict(datasets, order)
+
         results = {}
-        # only have one dataset if type is single
-        if self.type == "single":
-            train_dataset = datasets[order.index(self.config.learner.dataset)]
-            datasets = [train_dataset]
-        for dataset in datasets:
-            dataset_name = dataset.__class__.__name__
+        if self.config.testing.average_accuracy:
+            self.average_accuracy(testing_datasets)
+        if self.config.testing.few_shot:
+            self.few_shot_testing(testing_datasets)
+
+    def few_shot_testing(self, datasets):
+        """
+        Allow the model to train on a small amount of datapoints at a time. After every training step,
+        evaluate on many samples that haven't been seen yet.
+        """
+        all_predictions, all_labels = [], []
+        dataset = datasets[self.config.testing.eval_dataset]
+
+        self.logger.info(f"few shot testing on dataset {self.config.testing.eval_dataset}")
+
+        # split into training and testing point, assumes there is no meaningful difference in dataset order
+        train_dataset = dataset.new(0, self.config.testing.n_samples)
+        test_dataset = dataset.new(self.config.testing.n_samples, -1)
+        # sample a subset so validation doesn't take too long
+        test_dataset = test_dataset.sample(min(self.config.testing.validation_size, len(test_dataset)))
+        self.logger.info(f"Validating with test set of size {len(test_dataset)}")
+        train_dataloader = DataLoader(train_dataset, batch_size=self.config.testing.few_shot_batch_size, shuffle=False)
+        test_dataloader = DataLoader(test_dataset, batch_size=self.mini_batch_size, shuffle=False)
+
+        all_predictions, all_labels = [], []
+
+        self.metrics["evaluation"]["few_shot_training"] = []
+        self.metrics["evaluation"]["few_shot"] = [{
+            # zero shot accuracy
+            "n_samples": 0,
+            "accuracy": self.evaluate(dataloader=test_dataloader)["accuracy"]
+        }]
+
+        for i, (text, labels, datasets) in enumerate(train_dataloader):
+            logits, loss, key_loss = self.training_step(text, labels)
+            predictions = model_utils.make_prediction(logits.detach())
+
+            all_predictions.extend(predictions.tolist())
+            all_labels.extend(labels.tolist())
+            online_metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
+            self.metrics["evaluation"]["few_shot_training"].append({
+                "n_samples": i * self.config.testing.few_shot_batch_size,
+                "accuracy": online_metrics["accuracy"],
+                "task": datasets[0]  # assume whole batch is from same task
+            })
+            dataset_results = self.evaluate(dataloader=test_dataloader)
+            self.metrics["evaluation"]["few_shot"].append({
+                "n_samples": (i + 1) * self.config.testing.few_shot_batch_size,
+                "accuracy": dataset_results["accuracy"]
+            })
+
+    def average_accuracy(self, datasets):
+        results = {}
+        accuracies, precisions, recalls, f1s = [], [], [], []
+        for dataset_name, dataset in datasets.items():
             self.logger.info("Testing on {}".format(dataset_name))
-            test_dataloader = data.DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False,
-                                         collate_fn=dataset_utils.batch_encode)
+            test_dataloader = DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False)
             dataset_results = self.evaluate(dataloader=test_dataloader)
             accuracies.append(dataset_results["accuracy"])
             precisions.append(dataset_results["precision"])
@@ -209,21 +266,23 @@ class BasicMemory(Learner):
                         mean_results["accuracy"], mean_results["precision"], mean_results["recall"],
                         mean_results["f1"]
                     ))
-        return results, mean_results
+        self.metrics["evaluation"]["individual"] = results
+        self.metrics["evaluation"]["average"] = mean_results
 
     def set_eval(self):
         """Set all network components to evaluate mode"""
         self.encoder.eval()
 
-    def evaluate(self, dataloader):
+    def evaluate(self, dataloader, update_memory=False):
         all_losses, all_predictions, all_labels = [], [], []
 
         self.set_eval()
 
+        self.logger.info("Starting evaluation...")
         for i, (text, labels, datasets) in enumerate(dataloader):
             labels = torch.tensor(labels).to(self.device)
             with torch.no_grad():
-                logits, key_logits = self.forward(text, labels, update_memory=False)
+                logits, key_logits = self.forward(text, labels, update_memory=update_memory)
                 loss = self.loss_fn(logits, labels)
             loss = loss.item()
             pred = model_utils.make_prediction(logits.detach())
@@ -233,11 +292,12 @@ class BasicMemory(Learner):
             if i % 20 == 0:
                 self.logger.info(f"Batch {i + 1}/{len(dataloader)} processed")
 
-        acc, prec, rec, f1 = model_utils.calculate_metrics(all_predictions, all_labels)
+        results = model_utils.calculate_metrics(all_predictions, all_labels)
         self.logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
-                    "F1 score = {:.4f}".format(np.mean(all_losses), acc, prec, rec, f1))
+                    "F1 score = {:.4f}".format(np.mean(all_losses), results["accuracy"],
+                    results["precision"], results["recall"], results["f1"]))
 
-        return {"accuracy": acc, "precision": prec, "recall": rec, "f1": f1}
+        return results
 
     def model_state(self):
         return {
@@ -255,7 +315,6 @@ class BasicMemory(Learner):
 
     # def optimizer_state(self):
     #     return self.meta_optimizer.state_dict()
-
 
     # def load_optimizer_state(self, checkpoint):
     #     self.meta_optimizer.load_state_dict(checkpoint["optimizer"])

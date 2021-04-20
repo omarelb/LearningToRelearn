@@ -12,9 +12,9 @@ def calculate_metrics(predictions, labels, binary=False):
     recall = metrics.recall_score(labels, predictions, average=averaging, labels=unique_labels, zero_division=0)
     f1_score = metrics.f1_score(labels, predictions, average=averaging, labels=unique_labels, zero_division=0)
     return {"accuracy": accuracy,
-            "precision": precision, 
+            "precision": precision,
             "recall": recall,
-            "f1_score": f1_score}
+            "f1": f1_score}
 
 
 def calculate_accuracy(predictions, labels):
