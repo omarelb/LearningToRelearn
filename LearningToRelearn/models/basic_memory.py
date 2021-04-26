@@ -204,7 +204,8 @@ class BasicMemory(Learner):
         all_predictions, all_labels = [], []
         dataset = datasets[self.config.testing.eval_dataset]
 
-        self.logger.info(f"few shot testing on dataset {self.config.testing.eval_dataset}")
+        self.logger.info(f"few shot testing on dataset {self.config.testing.eval_dataset}"
+                         f"with {self.config.testing.n_samples} samples")
 
         # split into training and testing point, assumes there is no meaningful difference in dataset order
         train_dataset = dataset.new(0, self.config.testing.n_samples)
@@ -217,12 +218,19 @@ class BasicMemory(Learner):
 
         all_predictions, all_labels = [], []
 
-        self.metrics["evaluation"]["few_shot_training"] = []
-        self.metrics["evaluation"]["few_shot"] = [{
+        zero_shot = {
             # zero shot accuracy
-            "n_samples": 0,
-            "accuracy": self.evaluate(dataloader=test_dataloader)["accuracy"]
-        }]
+            "examples_seen": 0,
+            "accuracy": self.evaluate(dataloader=test_dataloader)["accuracy"],
+            "task": self.config.testing.eval_dataset
+        }
+        if self.config.wandb:
+            wandb.log({
+                "few_shot_accuracy": zero_shot["accuracy"],
+                "examples_seen": 0
+            })
+        self.metrics["evaluation"]["few_shot"] = [zero_shot]
+        self.metrics["evaluation"]["few_shot_training"] = []
 
         for i, (text, labels, datasets) in enumerate(train_dataloader):
             logits, loss, key_loss = self.training_step(text, labels)
@@ -231,16 +239,23 @@ class BasicMemory(Learner):
             all_predictions.extend(predictions.tolist())
             all_labels.extend(labels.tolist())
             online_metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
-            self.metrics["evaluation"]["few_shot_training"].append({
-                "n_samples": i * self.config.testing.few_shot_batch_size,
+            dataset_results = self.evaluate(dataloader=test_dataloader)
+
+            train_results = {
+                "examples_seen": i * self.config.testing.few_shot_batch_size,
                 "accuracy": online_metrics["accuracy"],
                 "task": datasets[0]  # assume whole batch is from same task
-            })
-            dataset_results = self.evaluate(dataloader=test_dataloader)
-            self.metrics["evaluation"]["few_shot"].append({
-                "n_samples": (i + 1) * self.config.testing.few_shot_batch_size,
-                "accuracy": dataset_results["accuracy"]
-            })
+            }
+            test_results = {
+                "examples_seen": (i + 1) * self.config.testing.few_shot_batch_size,
+                "accuracy": dataset_results["accuracy"],
+                "task": datasets[0]
+            }
+            self.metrics["evaluation"]["few_shot_training"].append(train_results)
+            self.metrics["evaluation"]["few_shot"].append(test_results)
+            if self.config.wandb:
+                wandb.log(train_results)
+                wandb.log(test_results)
 
     def average_accuracy(self, datasets):
         results = {}
@@ -268,6 +283,10 @@ class BasicMemory(Learner):
                     ))
         self.metrics["evaluation"]["individual"] = results
         self.metrics["evaluation"]["average"] = mean_results
+        if self.config.wandb:
+            wandb.log({
+                "testing_average_accuracy": mean_results["accuracy"]
+            })
 
     def set_eval(self):
         """Set all network components to evaluate mode"""

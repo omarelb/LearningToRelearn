@@ -20,7 +20,7 @@ from torch.utils.tensorboard import SummaryWriter
 from sklearn import metrics
 import matplotlib.pyplot as plt
 import hydra
-from omegaconf import DictConfig
+from omegaconf import DictConfig, open_dict
 import wandb
 
 from LearningToRelearn.datasets.text_classification_dataset import get_datasets, ClassificationDataset
@@ -51,7 +51,7 @@ class Learner:
 
         Parameters
         ----------
-        config: 
+        config:
             dict of parameters that drive the training behaviour.
         experiment_dir:
             path to experiment directory if it already exists
@@ -67,7 +67,8 @@ class Learner:
 
         # weights and biases
         if config.wandb:
-            config["exp_dir"] = self.exp_dir
+            with open_dict(config):
+                config["exp_dir"] = self.exp_dir.as_posix()
             if config.name is None:
                 config.name = "unnamed"
             experiment_id = update_experiment_ids(config)
@@ -179,7 +180,7 @@ class Learner:
     def testing(self, datasets, **kwargs):
         """
         Evaluate Continual Learning method by evaluating on all tasks after the model
-        has trained on all available data. 
+        has trained on all available data.
 
         Parameters
         ---
@@ -360,7 +361,7 @@ class Learner:
 def flatten_dict(d, parent_key='', sep='_'):
     items = []
     for k, v in d.items():
-        new_key = parent_key + sep + k if parent_key else k
+        new_key = str(parent_key) + str(sep) + str(k) if parent_key else k
         if isinstance(v, collections.MutableMapping):
             items.extend(flatten_dict(v, new_key, sep=sep).items())
         else:
