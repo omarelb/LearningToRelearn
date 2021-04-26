@@ -17,7 +17,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 
 from LearningToRelearn.datasets.text_classification_dataset import get_datasets
-from LearningToRelearn.learner import EXPERIMENT_DIR, flatten_dict
+from LearningToRelearn.learner import EXPERIMENT_DIR, METRICS_FILE, flatten_dict
 from LearningToRelearn.models.agem import AGEM
 from LearningToRelearn.models.anml import ANML
 from LearningToRelearn.models.baseline import Baseline
@@ -26,6 +26,7 @@ from LearningToRelearn.models.oml import OML
 from LearningToRelearn.models.replay import Replay
 from LearningToRelearn.models.relearning import Relearner
 from LearningToRelearn.models.basic_memory import BasicMemory
+from result_analysis import analyze_results
 
 RESULTS_FILE = Path(hydra.utils.to_absolute_path("results.csv"))
 
@@ -73,7 +74,7 @@ def write_results(config, mean_validation_results, mean_test_results):
 @hydra.main(config_path="config", config_name="defaults.yaml")
 def main(config):
     # to load a checkpoint and perform inference, add +evaluate=<dir_of_experiment>
-    if "evaluate" not in config: 
+    if "evaluate" not in config:
         learner = get_learner(config)
         datasets = get_datasets(learner.data_dir, config.data.order, debug=config.debug_data)
         learner.training(datasets)
@@ -93,7 +94,9 @@ def main(config):
     logger.info("----------Validation starts here----------")
     learner.testing(datasets["val"], order=datasets["order"])
     learner.write_metrics()
-    # mean_validation_results = {"validation_" + k : v for k, v in mean_results.items()}
+    validation_results = analyze_results(metrics_path=learner.results_dir / METRICS_FILE)
+
+    # validation_results = {"validation_" + k : v for k, v in mean_results.items()}
     # pd.DataFrame.from_dict(results, orient="index").to_csv(learner.results_dir / "validation_results.csv")
 
     # test set
@@ -103,7 +106,8 @@ def main(config):
     # pd.DataFrame.from_dict(results, orient="index").to_csv(learner.results_dir / "test_results.csv")
 
     if config.wandb:
-        # wandb.log(mean_validation_results)
+        wandb.run.summary.update(validation_results)
+        # wandb.log(validation_results)
         # wandb.log(mean_test_results)
         learner.wandb_run.finish()
 
