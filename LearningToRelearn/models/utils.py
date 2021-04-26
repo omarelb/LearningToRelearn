@@ -36,7 +36,7 @@ def make_prediction(output):
 def ewma(series=None, prev_value=None, new_value=None, alpha=0.5):
     """
     Exponentially weighted moving average.
-    
+
     Can be calculated over a series at once, or incrementially by supplying a new value.
     """
     if series is not None:

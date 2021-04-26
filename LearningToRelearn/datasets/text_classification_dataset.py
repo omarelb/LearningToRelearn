@@ -89,9 +89,9 @@ def cache_filename(file_path, split, ext=".csv", debug=False):
     name = file_path.stem
     n = MAX_TRAIN_SIZE if split == "train" else MAX_VAL_SIZE if split == "val" else MAX_TEST_SIZE
     if split == "val": name = "val"
-    new_name = f"preprocessed-{name}-seed_{SAMPLE_SEED}-n_{n}" + ("_debug" if debug else "") + ext 
+    new_name = f"preprocessed-{name}-seed_{SAMPLE_SEED}-n_{n}" + ("_debug" if debug else "") + ext
     return folder / new_name
-    
+
 
 class ClassificationDataset(data.Dataset):
     """
@@ -112,7 +112,7 @@ class ClassificationDataset(data.Dataset):
         above.
     load_preprocessed_from_cache:
         Whether to read and write preprocessed file from hard disk.
-    
+
     Attributes
     ---
     data:
@@ -134,7 +134,7 @@ class ClassificationDataset(data.Dataset):
         if data is not None:
             self.data = data
             return
-        assert data_path is not None and split is not None 
+        assert data_path is not None and split is not None
         assert split in ("train", "val", "test"), "specify correct split"
         file_path = {
             "train": Path(data_path) / settings["path"] / "train.csv",
@@ -250,7 +250,7 @@ DATASET_MAPPING = {
 
 def get_dataset(data_path, dataset_id, debug=False):
     """Return a single dataset given its id and path.
-    
+
     Train, validation,.and test sets are returned.
 
     If debug is set to True, only load a small subset of the data.
@@ -261,7 +261,7 @@ def get_dataset(data_path, dataset_id, debug=False):
         dataset(name=dataset_id, data_path=data_path, split="train", reduce=True, debug=debug),
         dataset(name=dataset_id, data_path=data_path, split="val", reduce=True, debug=debug),
         dataset(name=dataset_id, data_path=data_path, split="test", reduce=True, debug=debug),
-    ) 
+    )
 
 
 def get_datasets(data_path, data_order=1, debug=False):
@@ -293,12 +293,12 @@ def get_datasets(data_path, data_order=1, debug=False):
 def get_continuum(datasets, order=None, n_samples=None, shuffle=False, merge=True):
     """
     Generate a dataset representing a continuum of tasks.
-    
+
     The structure of the continuum of tasks can be manipulated by the order and n_samples parameters.
-    
+
     To ensure that each batch of data is from the same task, make sure that each entry in n_samples is a
     multiple of the batch size.
-    
+
     Parameters
     ---
     datasets: Dict[str, Dataset]
@@ -314,7 +314,7 @@ def get_continuum(datasets, order=None, n_samples=None, shuffle=False, merge=Tru
         If true, the *order* is shuffled (not all datapoints).
     merge: bool
         If true, merge all the datasets into one ConcatDataset. Otherwise, keep it as a list of Subset datasets.
-    
+
     Returns
     ---
     Union[Pytorch ConcatDataset, List[Pytorch Subset Dataset]]:
@@ -335,7 +335,7 @@ def get_continuum(datasets, order=None, n_samples=None, shuffle=False, merge=Tru
             raise AssertionError(
                 "The number of specified samples exceeds the number of samples in data, check n_samples"
             )
-    
+
     result = []
     permutation = list(range(len(order)))
     if shuffle:
@@ -362,9 +362,9 @@ def get_continuum(datasets, order=None, n_samples=None, shuffle=False, merge=Tru
 def alternating_order(datasets, n_samples_per_switch, tasks=None, relative_frequencies=None):
     """
     Return an alternating task ordering scheme that can be used as input to the `get_continuum` function.
-    
+
     Example: ["yelp", "amazon", "yelp", "amazon"], [10, 10, 10, 10]
-    
+
     Input
     ---
     datasets: Dict[str, Dataset]
@@ -378,7 +378,7 @@ def alternating_order(datasets, n_samples_per_switch, tasks=None, relative_frequ
         Specifies the relative sample frequency of each task. This is multiplied by `n_samples_per_swithch`.
         Example:
             relative_frequences = [2, 1] --> [20, 10, 20, 10]
-        
+
     Returns
     ---
     Tuple[List[str], List[int]]:
