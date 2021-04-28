@@ -126,11 +126,10 @@ class AGEM(Learner):
                 "examples_seen": n_examples_seen
             })
 
-
     def evaluate(self, dataloader):
         all_losses, all_predictions, all_labels = [], [], []
 
-        self.model.eval()
+        self.set_eval()
 
         for i, (text, labels) in enumerate(dataloader):
             labels = torch.tensor(labels).to(self.device)

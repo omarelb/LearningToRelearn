@@ -5,9 +5,10 @@ Every model in this folder defines a learning method, inheriting from a base lea
 
 Each model implements its own training loop, testing loop, and evaluation method (which is used during e.g. validation and in the testing loop.)
 
-Each model should implement the following methods:
-- training
+Each learner should implement the following methods:
+- training: training loop
 - testing
+- set_eval: setting all model parts to eval mode. For learners with only a single model, this just means doing self.model.eval(). Learners that only do this don't have to implement this method.
 
 Each model should do the following in their training loop:
 - adding training accuracy to the metrics at every iteration, using 

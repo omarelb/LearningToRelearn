@@ -170,7 +170,7 @@ class ClassificationDataset(data.Dataset):
         raise NotImplementedError(f"The method read_data should be implemented for subclass of {type(self)}")
 
     def sample(self, n, **kwargs):
-        return ClassificationDataset(name=self.name, data=self.data.sample(n, **kwargs))
+        return ClassificationDataset(name=self.name, data=self.data.sample(n, random_state=SAMPLE_SEED, **kwargs))
 
     def new(self, ix_low, ix_high):
         """Return new dataset with data given by indices"""
