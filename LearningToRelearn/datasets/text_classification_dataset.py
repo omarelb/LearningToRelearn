@@ -45,7 +45,8 @@ DATASET_ORDER_MAPPING = {
     1: ["yelp", "agnews", "dbpedia", "amazon", "yahoo"],
     2: ["dbpedia", "yahoo", "agnews", "amazon", "yelp"],
     3: ["yelp", "yahoo", "amazon", "dbpedia", "agnews"],
-    4: ["agnews", "yelp", "amazon", "yahoo", "dbpedia"]
+    4: ["agnews", "yelp", "amazon", "yahoo", "dbpedia"],
+    ### without yelp and amazon
 }
 
 

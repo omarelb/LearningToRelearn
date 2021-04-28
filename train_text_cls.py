@@ -94,7 +94,8 @@ def main(config):
     logger.info("----------Validation starts here----------")
     learner.testing(datasets["val"], order=datasets["order"])
     learner.write_metrics()
-    validation_results = analyze_results(metrics_path=learner.results_dir / METRICS_FILE)
+    validation_results = analyze_results(metrics_path=learner.results_dir / METRICS_FILE,
+                                         use_wandb=config.wandb)
 
     # validation_results = {"validation_" + k : v for k, v in mean_results.items()}
     # pd.DataFrame.from_dict(results, orient="index").to_csv(learner.results_dir / "validation_results.csv")
