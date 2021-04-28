@@ -8,6 +8,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import subprocess
+import wandb
 
 from LearningToRelearn.learner import flatten_dict
 
@@ -91,7 +92,7 @@ def collect_results(metrics):
     # results["few_shot_accuracy"] = metrics["evaluation"]["few_shot"]
     return results
 
-def analyze_results(metrics_path=None, metrics=None, write_path=None):
+def analyze_results(metrics_path=None, metrics=None, write_path=None, use_wandb=False):
     """
     Collect results contained in a metrics dictionary.
 
@@ -101,6 +102,8 @@ def analyze_results(metrics_path=None, metrics=None, write_path=None):
         Path to json file containing training run data.
     metrics: Dict
         Contains training run data to be analyzed.
+    use_wandb: bool
+        Whether using wandb. If so, log plots to wandb.
 
     Returns
     ---
@@ -134,6 +137,8 @@ def analyze_results(metrics_path=None, metrics=None, write_path=None):
     plt.figure(figsize=figsize)
     y = [result["accuracy"] for result in metrics["evaluation"]["few_shot"]]
     plt.plot(y)
+    if use_wandb:
+        wandb.log({"chart_few_shot_accuracy": plt})
     img = img_path / "few_shot_accuracy.pdf"
     plt.savefig(img)
     subprocess.call(f"pdfcrop {img} {img}", shell=True)
@@ -141,6 +146,8 @@ def analyze_results(metrics_path=None, metrics=None, write_path=None):
     # Online accuracy
     plt.figure(figsize=figsize)
     plt.plot(online_df["accuracy"])
+    if use_wandb:
+        wandb.log({"chart_online_accuracy": plt})
     img = img_path / "online_accuracy.pdf"
     plt.savefig(img)
     # crop the image
@@ -151,6 +158,8 @@ def analyze_results(metrics_path=None, metrics=None, write_path=None):
     x = list(results["few_shot_learning_curve_area"].keys())
     y = list(results["few_shot_learning_curve_area"].values())
     plt.plot(x, y)
+    if use_wandb:
+        wandb.log({"chart_few_shot_lca": plt})
     img = img_path / "few_shot_learning_curve_area.pdf"
     plt.savefig(img)
     subprocess.call(f"pdfcrop {img} {img}", shell=True)
@@ -160,18 +169,20 @@ def analyze_results(metrics_path=None, metrics=None, write_path=None):
     x = list(results["few_shot_learning_speed"].keys())
     y = list(results["few_shot_learning_speed"].values())
     plt.plot(x, y)
+    if use_wandb:
+        wandb.log({"chart_learning_speed": plt})
     img = img_path / "few_shot_learning_speed.pdf"
     plt.savefig(img)
     subprocess.call(f"pdfcrop {img} {img}", shell=True)
 
     #  task shifts
-    plt.figure(figsize=figsize)
-    task_shifts = online_df[online_df.task.shift() != online_df.task].examples_seen - 16
+    # plt.figure(figsize=figsize)
+    # task_shifts = online_df[online_df.task.shift() != online_df.task].examples_seen - 16
 
-    ax = online_df.plot(x="examples_seen", y="accuracy")
-    ax.vlines(x=task_shifts, ymin=0, ymax=1, color="black", linestyles="dashed")
-    img = img_path / "task_shifts.pdf"
-    plt.savefig(img)
-    subprocess.call(f"pdfcrop {img} {img}", shell=True)
+    # ax = online_df.plot(x="examples_seen", y="accuracy")
+    # ax.vlines(x=task_shifts, ymin=0, ymax=1, color="black", linestyles="dashed")
+    # img = img_path / "task_shifts.pdf"
+    # plt.savefig(img)
+    # subprocess.call(f"pdfcrop {img} {img}", shell=True)
 
     return results_flattened
