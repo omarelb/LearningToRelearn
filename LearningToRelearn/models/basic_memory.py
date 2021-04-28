@@ -104,16 +104,11 @@ class BasicMemory(Learner):
         dataset = get_continuum(train_datasets, order=datasets["order"], n_samples=[5000] * len(datasets["order"]))
         dataloader = DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False)
 
-        all_losses, all_key_losses, all_predictions, all_labels = [], [], [], []
-
         for text, labels, datasets in dataloader:
-            logits, loss, key_loss = self.training_step(text, labels)
-            predictions = model_utils.make_prediction(logits.detach())
+            output = self.training_step(text, labels)
+            predictions = model_utils.make_prediction(output["logits"].detach())
 
-            all_losses.append(loss)
-            all_key_losses.append(key_loss)
-            all_predictions.extend(predictions.tolist())
-            all_labels.extend(labels.tolist())
+            self.update_tracker(output, predictions, labels)
             online_metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
             self.metrics["online"].append({
                 "accuracy": online_metrics["accuracy"],
@@ -121,39 +116,54 @@ class BasicMemory(Learner):
                 "task": datasets[0]  # assumes whole batch is from same task
             })
             if self.current_iter % self.log_freq == 0:
-                metrics = model_utils.calculate_metrics(all_predictions, all_labels)
-                self.log(metrics, all_losses, all_key_losses)
-                all_losses, all_key_losses, all_predictions, all_labels = [], [], [], []
+                self.log()
                 self.write_metrics()
             if self.current_iter % self.validate_freq == 0:
                 self.validate(val_datasets, n_samples=self.config.training.n_validation_samples)
             self.current_iter += 1
 
-    def log(self, metrics, all_losses, all_key_losses):
+    def reset_tracker(self):
+        """Initializes dictionary that stores performance data during training for logging purposes."""
+        self.tracker = {
+            "losses": [],
+            "key_losses": [],
+            "predictions": [],
+            "labels": [],
+        }
+
+    def update_tracker(self, output, predictions, labels):
+        self.tracker["losses"].append(output["loss"])
+        self.tracker["key_losses"].append(output["key_loss"])
+        self.tracker["predictions"].extend(predictions.tolist())
+        self.tracker["labels"].extend(labels.tolist())
+
+    def log(self):
         """Log results during training to console and optionally other outputs
 
         Parameters
         ---
         metrics: dict mapping metric names to their values
         """
+        metrics = model_utils.calculate_metrics(self.tracker["predictions"], self.tracker["labels"])
         self.logger.info(
             "Iteration {} - Metrics: Loss = {:.4f}, key loss: {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
             "F1 score = {:.4f}".format(self.current_iter + 1,
-                                        np.mean(all_losses), np.mean(all_key_losses),
+                                        np.mean(self.tracker["losses"]), np.mean(self.tracker["key_losses"]),
                                         metrics["accuracy"], metrics["precision"], metrics["recall"], metrics["f1"]))
         if self.config.wandb:
             wandb.log({
                 "accuracy": metrics["accuracy"],
                 "precision": metrics["precision"],
                 "recall": metrics["recall"],
-                "f1": metrics["accuracy"],
-                "loss": np.mean(all_losses),
-                "key_loss": np.mean(all_key_losses),
+                "f1": metrics["f1"],
+                "loss": np.mean(self.tracker["losses"]),
+                "key_loss": np.mean(self.tracker["key_losses"]),
                 "examples_seen": self.examples_seen()
             })
+        self.reset_tracker()
 
     def training_step(self, text, labels):
-        self.encoder.train()
+        self.set_train()
         labels = torch.tensor(labels).to(self.device)
 
         logits, key_logits = self.forward(text, labels)
@@ -171,131 +181,14 @@ class BasicMemory(Learner):
         key_loss = 0
         self.logger.debug(f"Loss: {loss}")
         # self.logger.debug(f"Key Loss: {key_loss}")
-        return logits, loss, key_loss
+        return {"logits": logits, "loss": loss, "key_loss": key_loss}
 
     def examples_seen(self):
         return (self.current_iter + 1) * self.mini_batch_size
 
-    def testing(self, datasets, order):
-        """
-        Evaluate the learner after training.
-
-        Parameters
-        ---
-        datasets: List[Dataset]
-            Test datasets.
-        order: List[str]
-            Specifies order of encountered datasets
-        """
-        self.set_eval()
-        testing_datasets = datasets_dict(datasets, order)
-
-        results = {}
-        if self.config.testing.average_accuracy:
-            self.average_accuracy(testing_datasets)
-        if self.config.testing.few_shot:
-            self.few_shot_testing(testing_datasets)
-
-    def few_shot_testing(self, datasets):
-        """
-        Allow the model to train on a small amount of datapoints at a time. After every training step,
-        evaluate on many samples that haven't been seen yet.
-        """
-        all_predictions, all_labels = [], []
-        dataset = datasets[self.config.testing.eval_dataset]
-
-        self.logger.info(f"few shot testing on dataset {self.config.testing.eval_dataset}"
-                         f"with {self.config.testing.n_samples} samples")
-
-        # split into training and testing point, assumes there is no meaningful difference in dataset order
-        train_dataset = dataset.new(0, self.config.testing.n_samples)
-        test_dataset = dataset.new(self.config.testing.n_samples, -1)
-        # sample a subset so validation doesn't take too long
-        test_dataset = test_dataset.sample(min(self.config.testing.validation_size, len(test_dataset)))
-        self.logger.info(f"Validating with test set of size {len(test_dataset)}")
-        train_dataloader = DataLoader(train_dataset, batch_size=self.config.testing.few_shot_batch_size, shuffle=False)
-        test_dataloader = DataLoader(test_dataset, batch_size=self.mini_batch_size, shuffle=False)
-
-        all_predictions, all_labels = [], []
-
-        zero_shot = {
-            # zero shot accuracy
-            "examples_seen": 0,
-            "accuracy": self.evaluate(dataloader=test_dataloader)["accuracy"],
-            "task": self.config.testing.eval_dataset
-        }
-        if self.config.wandb:
-            wandb.log({
-                "few_shot_accuracy": zero_shot["accuracy"],
-                "examples_seen": 0
-            })
-        self.metrics["evaluation"]["few_shot"] = [zero_shot]
-        self.metrics["evaluation"]["few_shot_training"] = []
-
-        for i, (text, labels, datasets) in enumerate(train_dataloader):
-            logits, loss, key_loss = self.training_step(text, labels)
-            predictions = model_utils.make_prediction(logits.detach())
-
-            all_predictions.extend(predictions.tolist())
-            all_labels.extend(labels.tolist())
-            online_metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
-            dataset_results = self.evaluate(dataloader=test_dataloader)
-
-            train_results = {
-                "examples_seen": i * self.config.testing.few_shot_batch_size,
-                "accuracy": online_metrics["accuracy"],
-                "task": datasets[0]  # assume whole batch is from same task
-            }
-            test_results = {
-                "examples_seen": (i + 1) * self.config.testing.few_shot_batch_size,
-                "accuracy": dataset_results["accuracy"],
-                "task": datasets[0]
-            }
-            self.metrics["evaluation"]["few_shot_training"].append(train_results)
-            self.metrics["evaluation"]["few_shot"].append(test_results)
-            if self.config.wandb:
-                wandb.log(train_results)
-                wandb.log(test_results)
-
-    def average_accuracy(self, datasets):
-        results = {}
-        accuracies, precisions, recalls, f1s = [], [], [], []
-        for dataset_name, dataset in datasets.items():
-            self.logger.info("Testing on {}".format(dataset_name))
-            test_dataloader = DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False)
-            dataset_results = self.evaluate(dataloader=test_dataloader)
-            accuracies.append(dataset_results["accuracy"])
-            precisions.append(dataset_results["precision"])
-            recalls.append(dataset_results["recall"])
-            f1s.append(dataset_results["f1"])
-            results[dataset_name] = dataset_results
-
-        mean_results = {
-            "accuracy": np.mean(accuracies),
-            "precision": np.mean(precisions),
-            "recall": np.mean(recalls),
-            "f1": np.mean(f1s)
-        }
-        self.logger.info("Overall test metrics: Accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
-                    "F1 score = {:.4f}".format(
-                        mean_results["accuracy"], mean_results["precision"], mean_results["recall"],
-                        mean_results["f1"]
-                    ))
-        self.metrics["evaluation"]["individual"] = results
-        self.metrics["evaluation"]["average"] = mean_results
-        if self.config.wandb:
-            wandb.log({
-                "testing_average_accuracy": mean_results["accuracy"]
-            })
-
-    def set_eval(self):
-        """Set all network components to evaluate mode"""
-        self.encoder.eval()
-
     def evaluate(self, dataloader, update_memory=False):
-        all_losses, all_predictions, all_labels = [], [], []
-
         self.set_eval()
+        all_losses, all_predictions, all_labels = [], [], []
 
         self.logger.info("Starting evaluation...")
         for i, (text, labels, datasets) in enumerate(dataloader):
@@ -346,3 +239,17 @@ class BasicMemory(Learner):
     def load_other_state_information(self, checkpoint):
         """Any learner specific state information is loaded here"""
         self.memory = checkpoint["memory"]
+
+    def set_train(self):
+        """Set underlying pytorch network to train mode.
+        
+        If learner has multiple models, this method should be overwritten.
+        """
+        self.encoder.train()
+
+    def set_eval(self):
+        """Set underlying pytorch network to evaluation mode.
+        
+        If learner has multiple models, this method should be overwritten.
+        """
+        self.encoder.eval()

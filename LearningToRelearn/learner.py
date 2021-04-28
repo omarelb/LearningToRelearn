@@ -23,7 +23,9 @@ import hydra
 from omegaconf import DictConfig, open_dict
 import wandb
 
-from LearningToRelearn.datasets.text_classification_dataset import get_datasets, ClassificationDataset
+import LearningToRelearn.models.utils as model_utils
+from LearningToRelearn.datasets.text_classification_dataset import get_datasets, ClassificationDataset,\
+                                                                   datasets_dict
 from LearningToRelearn.datasets.utils import batch_encode
 
 # plt.style.use("seaborn-paper")
@@ -139,6 +141,8 @@ class Learner:
         # this is used to track metrics of different tasks during training
         self.metrics = collections.defaultdict(dict)
         self.metrics["online"] = []
+        self.reset_tracker()
+
         # specifies which task the learner is currently learning
         # it is up to the specific learner to update this
         self.previous_task = None
@@ -177,25 +181,34 @@ class Learner:
             wandb.log(to_log)
         return result
 
-    def testing(self, datasets, **kwargs):
+    def testing(self, datasets, order):
         """
-        Evaluate Continual Learning method by evaluating on all tasks after the model
-        has trained on all available data.
+        Evaluate the learner after training.
 
         Parameters
         ---
         datasets: List[Dataset]
             Test datasets.
+        order: List[str]
+            Specifies order of encountered datasets
         """
-        accuracies, precisions, recalls, f1s = [], [], [], []
+        self.set_eval()
+        testing_datasets = datasets_dict(datasets, order)
+
+        if self.config.testing.average_accuracy:
+            self.average_accuracy(testing_datasets)
+        if self.config.testing.few_shot:
+            self.few_shot_testing(testing_datasets)
+
+    def average_accuracy(self, datasets):
         results = {}
-        for dataset in datasets:
-            dataset_name = dataset.__class__.__name__
+        accuracies, precisions, recalls, f1s = [], [], [], []
+        for dataset_name, dataset in datasets.items():
             self.logger.info("Testing on {}".format(dataset_name))
-            # test_dataloader = DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False,
-            #                              collate_fn=batch_encode)
+            if self.config.testing.average_validation_size is not None:
+                dataset = dataset.sample(min(len(dataset), self.config.testing.average_validation_size))
             test_dataloader = DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False)
-            dataset_results = self.evaluate(dataloader=test_dataloader, **kwargs)
+            dataset_results = self.evaluate(dataloader=test_dataloader)
             accuracies.append(dataset_results["accuracy"])
             precisions.append(dataset_results["precision"])
             recalls.append(dataset_results["recall"])
@@ -213,7 +226,96 @@ class Learner:
                         mean_results["accuracy"], mean_results["precision"], mean_results["recall"],
                         mean_results["f1"]
                     ))
-        return results, mean_results
+        self.metrics["evaluation"]["individual"] = results
+        self.metrics["evaluation"]["average"] = mean_results
+        if self.config.wandb:
+            wandb.log({
+                "testing_average_accuracy": mean_results["accuracy"]
+            })
+
+    def few_shot_testing(self, datasets):
+        """
+        Allow the model to train on a small amount of datapoints at a time. After every training step,
+        evaluate on many samples that haven't been seen yet.
+
+        Results are saved in learner's `metrics` attribute.
+
+        Parameters
+        ---
+        datasets: Dict[str, Dataset]
+            Maps a dataset name to its corresponding dataset object. Should not contain training data.
+        """
+        all_predictions, all_labels = [], []
+        # TODO: evaluate on all datasets instead of just one.
+        dataset = datasets[self.config.testing.eval_dataset]
+
+        self.logger.info(f"few shot testing on dataset {self.config.testing.eval_dataset}"
+                         f"with {self.config.testing.n_samples} samples")
+
+        # split into training and testing point, assumes there is no meaningful difference in dataset order
+        train_dataset = dataset.new(0, self.config.testing.n_samples)
+        test_dataset = dataset.new(self.config.testing.n_samples, -1)
+        # sample a subset so validation doesn't take too long
+        test_dataset = test_dataset.sample(min(self.config.testing.few_shot_validation_size, len(test_dataset)))
+        self.logger.info(f"Validating with test set of size {len(test_dataset)}")
+        train_dataloader = DataLoader(train_dataset, batch_size=self.config.testing.few_shot_batch_size, shuffle=False)
+        test_dataloader = DataLoader(test_dataset, batch_size=self.mini_batch_size, shuffle=False)
+
+        all_predictions, all_labels = [], []
+
+        zero_shot = {
+            # zero shot accuracy
+            "examples_seen": 0,
+            "accuracy": self.evaluate(dataloader=test_dataloader)["accuracy"],
+            "task": self.config.testing.eval_dataset
+        }
+        if self.config.wandb:
+            wandb.log({
+                "few_shot_accuracy": zero_shot["accuracy"],
+                "examples_seen": 0
+            })
+        self.metrics["evaluation"]["few_shot"] = [zero_shot]
+        self.metrics["evaluation"]["few_shot_training"] = []
+
+        for i, (text, labels, datasets) in enumerate(train_dataloader):
+            output = self.training_step(text, labels)
+            predictions = model_utils.make_prediction(output["logits"].detach())
+
+            all_predictions.extend(predictions.tolist())
+            all_labels.extend(labels.tolist())
+            online_metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
+            dataset_results = self.evaluate(dataloader=test_dataloader)
+
+            train_results = {
+                "examples_seen": i * self.config.testing.few_shot_batch_size,
+                "accuracy": online_metrics["accuracy"],
+                "task": datasets[0]  # assume whole batch is from same task
+            }
+            test_results = {
+                "examples_seen": (i + 1) * self.config.testing.few_shot_batch_size,
+                "accuracy": dataset_results["accuracy"],
+                "task": datasets[0]
+            }
+            self.metrics["evaluation"]["few_shot_training"].append(train_results)
+            self.metrics["evaluation"]["few_shot"].append(test_results)
+            if self.config.wandb:
+                wandb.log(train_results)
+                wandb.log(test_results)
+
+    def reset_tracker(self):
+        """Initialize dictionary that stores information about loss, predictions, and labels
+        during training, for logging purposes.
+        """
+        self.tracker = {
+            "losses": [],
+            "predictions": [],
+            "labels": []
+        }
+
+    def update_tracker(self, output, predictions, labels):
+        self.tracker["losses"].append(output["loss"])
+        self.tracker["predictions"].extend(predictions.tolist())
+        self.tracker["labels"].extend(labels.tolist())
 
     def replay_parameters(self):
         if self.replay_rate != 0:
@@ -317,12 +419,6 @@ class Learner:
     def get_datasets(self, data_dir, order):
         return get_datasets(data_dir, order)
 
-    def time_metrics(self, data_length):
-        time_elapsed = time.time() - self.start_time
-        time_per_iteration = time_elapsed / self.log_freq  # seconds per iteration
-        estimated_time_left = time.strftime('%H:%M:%S', time.gmtime(time_per_iteration * (data_length - (self.current_iter + 1))))
-        return time_per_iteration, estimated_time_left
-
     def time_checkpoint(self):
         """Save a checkpoint when a certain amount of time has elapsed."""
         curtime = time.time()
@@ -357,6 +453,20 @@ class Learner:
     def write_metrics(self):
         with open(self.results_dir / METRICS_FILE, "w") as f:
             json.dump(self.metrics, f)
+
+    def set_train(self):
+        """Set underlying pytorch network to train mode.
+        
+        If learner has multiple models, this method should be overwritten.
+        """
+        self.model.train()
+
+    def set_eval(self):
+        """Set underlying pytorch network to evaluation mode.
+        
+        If learner has multiple models, this method should be overwritten.
+        """
+        self.model.eval()
 
 def flatten_dict(d, parent_key='', sep='_'):
     items = []
