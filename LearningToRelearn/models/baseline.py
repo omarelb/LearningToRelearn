@@ -39,20 +39,23 @@ class Baseline(Learner):
 
         if self.type == "sequential":
             n_samples = [samples_per_task] * len(train_datasets) if samples_per_task is not None else samples_per_task
-            for train_dataset in get_continuum(train_datasets, order=datasets["order"],
-                                               n_samples=n_samples, merge=False):
+            # if task_order is specified, use that instead of datasets["order"]
+            order = self.config.task_order if self.config.task_order is not None else datasets["order"]
+            self.logger.info(f"Using task order {order}")
+            for train_dataset in get_continuum(train_datasets, order=order, n_samples=n_samples, merge=False):
                 self.logger.info("Training on {}".format(train_dataset.__class__.__name__))
                 train_dataloader = DataLoader(train_dataset, batch_size=self.mini_batch_size, shuffle=False)
                 self.train(dataloader=train_dataloader, datasets=datasets)
         elif self.type == "multitask":
             self.logger.info("Training multi-task model on all datasets")
-            train_dataloader = DataLoader(get_continuum(data), batch_size=self.mini_batch_size, shuffle=True)
+            train_dataloader = DataLoader(get_continuum(train_datasets), batch_size=self.mini_batch_size, shuffle=True)
             self.train(dataloader=train_dataloader, datasets=datasets)
         elif self.type == "single":
             # train on a single task / dataset
             self.logger.info(f"Training single model on dataset {self.config.learner.dataset}")
-            train_dataloader = DataLoader(get_continuum(train_datasets, order=[self.config.learner.dataset]),
-                                               batch_size=self.mini_batch_size, shuffle=True)
+            n_samples = [samples_per_task] if samples_per_task is not None else None
+            data = get_continuum(train_datasets, order=[self.config.learner.dataset], n_samples=n_samples)
+            train_dataloader = DataLoader(data, batch_size=self.mini_batch_size, shuffle=True)
             self.train(dataloader=train_dataloader, datasets=datasets)
         elif self.type == "alternating":
             order, n_samples = alternating_order(train_datasets, tasks=self.config.data.alternating_tasks,
