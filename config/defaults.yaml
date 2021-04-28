@@ -22,7 +22,8 @@ testing:
   few_shot: true # whether to perform few shot evaluation
   eval_dataset: yelp # which dataset to perform few shot evaluation on
   n_samples: 32 # how many samples train on during few shot evaluation
-  validation_size: 100 # sample a subset so validation doesn't take too long during few shot evaluation
+  few_shot_validation_size: 100 # sample a subset so validation doesn't take too long during few shot evaluation
+  average_validation_size: # sample a subset so validation doesn't take too long during computation of average accuracy. use for debugging purposes
 
 seed: 42 # random seed
 inference: false
@@ -33,6 +34,7 @@ replay_every: 9600 # Number of data points between replay
 updates: 5 # number of inner loop updates
 clip_grad_norm: 25 # gradient norm clipping (for replay learner)
 checkpoint_while_training: true # whether to checkpoint while training
+save_checkpoint: true # whether to save checkpoint after training
 save_optimizer_state: false # whether to save the optimizer state when checkpointing
 delete_previous_checkpoint: true # whether to overwrite the previous checkpoint when saving a checkpoint
 save_freq: 60 # in minutes, specifies how often a model is saved
