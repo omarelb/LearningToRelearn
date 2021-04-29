@@ -42,10 +42,10 @@ DATASET_SETTINGS = {
 
 # Define the ordering of the datasets
 DATASET_ORDER_MAPPING = {
-    1: ["yelp", "agnews", "dbpedia", "amazon", "yahoo"],
-    2: ["dbpedia", "yahoo", "agnews", "amazon", "yelp"],
-    3: ["yelp", "yahoo", "amazon", "dbpedia", "agnews"],
-    4: ["agnews", "yelp", "amazon", "yahoo", "dbpedia"],
+    1: ["agnews", "dbpedia", "amazon", "yahoo"],
+    2: ["dbpedia", "yahoo", "agnews", "amazon"],
+    3: ["yahoo", "amazon", "dbpedia", "agnews"],
+    4: ["agnews", "amazon", "yahoo", "dbpedia"],
     ### without yelp and amazon
 }
 
