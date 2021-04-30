@@ -101,7 +101,10 @@ class BasicMemory(Learner):
         train_datasets = datasets_dict(datasets["train"], datasets["order"])
         val_datasets = datasets_dict(datasets["val"], datasets["order"])
 
-        dataset = get_continuum(train_datasets, order=datasets["order"], n_samples=[5000] * len(datasets["order"]))
+        samples_per_task = self.config.learner.samples_per_task
+        order = self.config.task_order if self.config.task_order is not None else datasets["order"]
+        n_samples = [samples_per_task] * len(order) if samples_per_task is not None else samples_per_task
+        dataset = get_continuum(train_datasets, order=order, n_samples=n_samples)
         dataloader = DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False)
 
         for text, labels, datasets in dataloader:
