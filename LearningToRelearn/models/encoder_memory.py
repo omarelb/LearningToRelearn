@@ -293,16 +293,24 @@ class EncoderMemory(Learner):
         return results
 
     def model_state(self):
-        return {
+        state = {
             "encoder": self.encoder.state_dict(),
             "classifier": self.classifier.state_dict(),
-            "key_classifier": self.key_classifier.state_dict(),
         }
+        for i in range(len(self.key_dim)):
+            state[f"key_classifier_{i}"] = self.key_classifiers[i].state_dict()
+            state[f"key_encoder_{i}"] = self.key_encoders[i].state_dict()
+            state[f"key_decoder_{i}"] = self.key_decoders[i].state_dict()
+
+        return state
 
     def load_model_state(self, checkpoint):
         self.encoder.load_state_dict(checkpoint["model_state"]["encoder"])
         self.classifier.load_state_dict(checkpoint["model_state"]["classifier"])
-        self.key_classifier.load_state_dict(checkpoint["model_state"]["key_classifier"])
+        for i in range(len(self.key_dim)):
+            self.key_classifiers[i].load_state_dict(checkpoint["model_state"][f"key_classifier_{i}"])
+            self.key_encoders[i].load_state_dict(checkpoint["model_state"][f"key_encoder_{i}"])
+            self.key_decoders[i].load_state_dict(checkpoint["model_state"][f"key_decoder_{i}"])
 
     # def optimizer_state(self):
     #     return self.meta_optimizer.state_dict()
@@ -312,12 +320,13 @@ class EncoderMemory(Learner):
 
     def save_other_state_information(self, state):
         """Any learner specific state information is added here"""
-        state["memory"] = self.memory
+        # state["memory"] = self.memory
         return state
 
     def load_other_state_information(self, checkpoint):
         """Any learner specific state information is loaded here"""
-        self.memory = checkpoint["memory"]
+        pass
+        # self.memory = checkpoint["memory"]
 
     def set_train(self):
         """Set underlying pytorch network to train mode.
