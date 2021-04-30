@@ -42,13 +42,9 @@ class EncoderMemory(Learner):
         self.logger.info("Loaded {} as model".format(self.encoder.__class__.__name__))
         # self.decoder = LSTMDecoder(key_size=config.learner.key_dim, embedding_size=TRANSFORMER_HDIM).to(self.device)
         dimensions = [TRANSFORMER_HDIM] + list(self.key_dim)
-        self.key_encoders = [nn.Linear(dim, next_dim).to(self.device) for dim, next_dim in zip(dimensions, dimensions[1:])] 
-        self.key_decoders = [nn.Linear(next_dim, dim).to(self.device) for dim, next_dim in zip(dimensions, dimensions[1:])] 
+        self.key_encoders = [relu(nn.Linear(dim, next_dim).to(self.device)) for dim, next_dim in zip(dimensions, dimensions[1:])]
+        self.key_decoders = [relu(nn.Linear(key_dim, TRANSFORMER_HDIM).to(self.device)) for key_dim in self.key_dim] 
         self.logger.info(f"Key encoders: {self.key_encoders} -- key decoders: {self.key_decoders}")
-        # self.key_encoder = nn.Linear(TRANSFORMER_HDIM, self.key_dim).to(self.device)
-        # self.key_decoder = nn.Linear(self.key_dim, TRANSFORMER_HDIM).to(self.device)
-        # self.key_encoder = lambda x: x  # for now
-        # self.key_decoder = lambda x: x  # for now
         self.classifier = nn.Linear(TRANSFORMER_HDIM, config.data.n_classes).to(self.device)
         # self.key_classifiers = nn.Linear(self.key_dim, config.data.n_classes).to(self.device)
         self.key_classifiers = [nn.Linear(dim, config.data.n_classes).to(self.device) for dim in self.key_dim]
@@ -60,7 +56,7 @@ class EncoderMemory(Learner):
                                                 *[key_decoder.parameters() for key_decoder in self.key_decoders],
                                                 *[key_classifier.parameters() for key_classifier in self.key_classifiers],
                                                 self.classifier.parameters()
-                                )
+                                                )
                                 if p.requires_grad],
                                 lr=self.lr)
 
@@ -110,13 +106,15 @@ class EncoderMemory(Learner):
         # update here
         self.optimizer.zero_grad()
 
-        loss.backward(retain_graph=True)
+        # backward passes
         for reconstruction_error in output["reconstruction_errors"]:
             reconstruction_error.backward(retain_graph=True)
-        for key_loss in key_losses[:-1]:
+        for key_loss in key_losses:
             key_loss.backward(retain_graph=True)
-        key_losses[-1].backward()
+        loss.backward()
+
         self.optimizer.step()
+
         loss = loss.item()
         key_losses = [key_loss.item() for key_loss in key_losses]
         # key_loss = 0
@@ -143,11 +141,11 @@ class EncoderMemory(Learner):
         """
         input_dict = self.encoder.encode_text(text)
         text_embedding = self.encoder(input_dict)
-        key_embeddings = self.encode_keys(text_embedding)
+        key_embeddings = self.encode_keys(text_embedding.detach())
         reconstructions = [key_decoder(key_embedding) for key_decoder, key_embedding in zip(self.key_decoders, key_embeddings)]
         reconstruction_errors = [
-            ((real_embedding.detach() - reconstruction) ** 2).mean()
-            for real_embedding, reconstruction in zip([text_embedding] + key_embeddings[:-1], reconstructions)
+            # reconstruction should go to original text embedding
+            ((text_embedding.detach() - reconstruction) ** 2).mean() for reconstruction in reconstructions
         ]
 
         # query_result = self.memory.query(key_embedding, self.n_neighbours)
@@ -241,8 +239,8 @@ class EncoderMemory(Learner):
         ]
         key_accuracy_str = [f'{km["accuracy"]:.4f}' for km in key_metrics]
         self.logger.info(
-            f"Iteration {self.current_iter + 1} - Metrics: Loss = {loss:.4f}, "
-        f"key loss = {[f'{key_loss:.4f}' for key_loss in key_losses]}, "
+            f"Iteration {self.current_iter + 1} - Task = {self.metrics[-1]{"task"}} - Metrics: Loss = {loss:.4f}, "
+            f"key loss = {[f'{key_loss:.4f}' for key_loss in key_losses]}, "
             f"reconstruction error = {[f'{reconstruction_error:.4f}' for reconstruction_error in reconstruction_errors]}, "
             f"accuracy = {metrics['accuracy']:.4f} - "
             f"key accuracy = {key_accuracy_str}"
@@ -341,3 +339,10 @@ class EncoderMemory(Learner):
         If learner has multiple models, this method should be overwritten.
         """
         self.encoder.eval()
+
+def relu(module):
+    """Shortcut for concatenating a relu nonlinearity to a netowrk module"""
+    return nn.Sequential(
+        module,
+        nn.ReLU()
+    )
