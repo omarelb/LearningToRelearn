@@ -81,13 +81,16 @@ def collect_results(metrics):
     # return online accuracy, the average accuracy during training.
     results["online_accuracy"] = pd.DataFrame(metrics["online"]).accuracy.mean()
     # mean accuracy over all evaluation datasets
-    results["average_accuracy"] = metrics["evaluation"]["average"]["accuracy"]
+    if "average" in metrics["evaluation"]:
+        results["average_accuracy"] = metrics["evaluation"]["average"]["accuracy"]
     # accuracy over individual evaluation datasets
-    results["individual_accuracy"] = metrics["evaluation"]["individual"]
+    if "individual" in metrics["evaluation"]:
+        results["individual_accuracy"] = metrics["evaluation"]["individual"]
     # task that was evaluated
-    results["eval_task"] = metrics["evaluation"]["few_shot"][0]["task"]
-    results["few_shot_learning_curve_area"] = learning_curve_area(metrics["evaluation"]["few_shot"], batch_wise=False)
-    results["few_shot_learning_speed"] = learning_slope(metrics["evaluation"]["few_shot"])
+    if "few_shot" in metrics["evaluation"]:
+        results["eval_task"] = metrics["evaluation"]["few_shot"][0]["task"]
+        results["few_shot_learning_curve_area"] = learning_curve_area(metrics["evaluation"]["few_shot"], batch_wise=False)
+        results["few_shot_learning_speed"] = learning_slope(metrics["evaluation"]["few_shot"])
     # validation accuracy after training on k samples, for multiple k
     # results["few_shot_accuracy"] = metrics["evaluation"]["few_shot"]
     return results
@@ -133,15 +136,16 @@ def analyze_results(metrics_path=None, metrics=None, write_path=None, use_wandb=
     online_df = pd.DataFrame(metrics["online"])
 
     figsize = (20, 10)
-    # few shot accuracy
-    plt.figure(figsize=figsize)
-    y = [result["accuracy"] for result in metrics["evaluation"]["few_shot"]]
-    plt.plot(y)
-    if use_wandb:
-        wandb.log({"chart_few_shot_accuracy": plt})
-    img = img_path / "few_shot_accuracy.pdf"
-    plt.savefig(img)
-    subprocess.call(f"pdfcrop {img} {img}", shell=True)
+    if "few_shot" in metrics["evaluation"]:
+        # few shot accuracy
+        plt.figure(figsize=figsize)
+        y = [result["accuracy"] for result in metrics["evaluation"]["few_shot"]]
+        plt.plot(y)
+        if use_wandb:
+            wandb.log({"chart_few_shot_accuracy": plt})
+        img = img_path / "few_shot_accuracy.pdf"
+        plt.savefig(img)
+        subprocess.call(f"pdfcrop {img} {img}", shell=True)
 
     # Online accuracy
     plt.figure(figsize=figsize)
@@ -153,27 +157,29 @@ def analyze_results(metrics_path=None, metrics=None, write_path=None, use_wandb=
     # crop the image
     subprocess.call(f"pdfcrop {img} {img}", shell=True)
 
-    # Few shot learning curve area
-    plt.figure(figsize=figsize)
-    x = list(results["few_shot_learning_curve_area"].keys())
-    y = list(results["few_shot_learning_curve_area"].values())
-    plt.plot(x, y)
-    if use_wandb:
-        wandb.log({"chart_few_shot_lca": plt})
-    img = img_path / "few_shot_learning_curve_area.pdf"
-    plt.savefig(img)
-    subprocess.call(f"pdfcrop {img} {img}", shell=True)
+    if "few_shot_learning_curve_area" in results:
+        # Few shot learning curve area
+        plt.figure(figsize=figsize)
+        x = list(results["few_shot_learning_curve_area"].keys())
+        y = list(results["few_shot_learning_curve_area"].values())
+        plt.plot(x, y)
+        if use_wandb:
+            wandb.log({"chart_few_shot_lca": plt})
+        img = img_path / "few_shot_learning_curve_area.pdf"
+        plt.savefig(img)
+        subprocess.call(f"pdfcrop {img} {img}", shell=True)
 
-    # Few shot learning speed
-    plt.figure(figsize=figsize)
-    x = list(results["few_shot_learning_speed"].keys())
-    y = list(results["few_shot_learning_speed"].values())
-    plt.plot(x, y)
-    if use_wandb:
-        wandb.log({"chart_learning_speed": plt})
-    img = img_path / "few_shot_learning_speed.pdf"
-    plt.savefig(img)
-    subprocess.call(f"pdfcrop {img} {img}", shell=True)
+    if "few_shot_learning_speed" in results:
+        # Few shot learning speed
+        plt.figure(figsize=figsize)
+        x = list(results["few_shot_learning_speed"].keys())
+        y = list(results["few_shot_learning_speed"].values())
+        plt.plot(x, y)
+        if use_wandb:
+            wandb.log({"chart_learning_speed": plt})
+        img = img_path / "few_shot_learning_speed.pdf"
+        plt.savefig(img)
+        subprocess.call(f"pdfcrop {img} {img}", shell=True)
 
     #  task shifts
     # plt.figure(figsize=figsize)
