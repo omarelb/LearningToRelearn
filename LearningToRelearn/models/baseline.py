@@ -37,10 +37,10 @@ class Baseline(Learner):
         train_datasets = datasets_dict(datasets["train"], datasets["order"])
         samples_per_task = self.config.learner.samples_per_task
 
+        order = self.config.task_order if self.config.task_order is not None else datasets["order"]
+        n_samples = [samples_per_task] * len(order) if samples_per_task is not None else samples_per_task
         if self.type == "sequential":
-            n_samples = [samples_per_task] * len(train_datasets) if samples_per_task is not None else samples_per_task
             # if task_order is specified, use that instead of datasets["order"]
-            order = self.config.task_order if self.config.task_order is not None else datasets["order"]
             self.logger.info(f"Using task order {order}")
             for train_dataset in get_continuum(train_datasets, order=order, n_samples=n_samples, merge=False):
                 self.logger.info("Training on {}".format(train_dataset.__class__.__name__))
@@ -48,7 +48,8 @@ class Baseline(Learner):
                 self.train(dataloader=train_dataloader, datasets=datasets)
         elif self.type == "multitask":
             self.logger.info("Training multi-task model on all datasets")
-            train_dataloader = DataLoader(get_continuum(train_datasets), batch_size=self.mini_batch_size, shuffle=True)
+            data = get_continuum(train_datasets, order=order, n_samples=n_samples)
+            train_dataloader = DataLoader(data, batch_size=self.mini_batch_size, shuffle=True)
             self.train(dataloader=train_dataloader, datasets=datasets)
         elif self.type == "single":
             # train on a single task / dataset
