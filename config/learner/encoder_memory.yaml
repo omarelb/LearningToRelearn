@@ -1,0 +1,6 @@
+learner:
+  type: encoder_memory # multitask learning
+  lr: 0.00003 # learning rate
+  key_dim: [768, 384] # dimension of key embeddings. If multiple given, multiple key encoders are created
+  n_neighbours: 5
+  memory_size: 10000

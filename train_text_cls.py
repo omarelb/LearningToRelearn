@@ -18,6 +18,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from LearningToRelearn.datasets.text_classification_dataset import get_datasets
 from LearningToRelearn.learner import EXPERIMENT_DIR, METRICS_FILE, flatten_dict
+# TODO: import learner programmatically
 from LearningToRelearn.models.agem import AGEM
 from LearningToRelearn.models.anml import ANML
 from LearningToRelearn.models.baseline import Baseline
@@ -26,6 +27,7 @@ from LearningToRelearn.models.oml import OML
 from LearningToRelearn.models.replay import Replay
 from LearningToRelearn.models.relearning import Relearner
 from LearningToRelearn.models.basic_memory import BasicMemory
+from LearningToRelearn.models.encoder_memory import EncoderMemory
 from result_analysis import analyze_results
 
 RESULTS_FILE = Path(hydra.utils.to_absolute_path("results.csv"))
@@ -53,6 +55,8 @@ def get_learner(config, **kwargs):
         learner = Relearner(config, **kwargs)
     elif config.learner.type == "basic_memory":
         learner = BasicMemory(config, **kwargs)
+    elif config.learner.type == "encoder_memory":
+        learner = EncoderMemory(config, **kwargs)
     else:
         raise NotImplementedError
     return learner
