@@ -2,5 +2,6 @@ learner:
   type: encoder_memory # multitask learning
   lr: 0.00003 # learning rate
   key_dim: [768, 384] # dimension of key embeddings. If multiple given, multiple key encoders are created
+  full_reconstruction: true # whether key embeddings are regularized by trying to reconstruct the original text embedding instead of the previous encoder's embedding.
   n_neighbours: 5
   memory_size: 10000
