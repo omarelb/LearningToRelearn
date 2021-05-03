@@ -42,8 +42,12 @@ class EncoderMemory(Learner):
         self.logger.info("Loaded {} as model".format(self.encoder.__class__.__name__))
         # self.decoder = LSTMDecoder(key_size=config.learner.key_dim, embedding_size=TRANSFORMER_HDIM).to(self.device)
         dimensions = [TRANSFORMER_HDIM] + list(self.key_dim)
-        self.key_encoders = [relu(nn.Linear(dim, next_dim).to(self.device)) for dim, next_dim in zip(dimensions, dimensions[1:])]
-        self.key_decoders = [relu(nn.Linear(key_dim, TRANSFORMER_HDIM).to(self.device)) for key_dim in self.key_dim] 
+        if self.config.learner.full_reconstruction:
+            self.key_encoders = [relu(nn.Linear(dim, next_dim).to(self.device)) for dim, next_dim in zip(dimensions, dimensions[1:])]
+            self.key_decoders = [relu(nn.Linear(key_dim, TRANSFORMER_HDIM).to(self.device)) for key_dim in self.key_dim] 
+        else:
+            self.key_encoders = [nn.Linear(dim, next_dim).to(self.device) for dim, next_dim in zip(dimensions, dimensions[1:])] 
+            self.key_decoders = [nn.Linear(next_dim, dim).to(self.device) for dim, next_dim in zip(dimensions, dimensions[1:])]
         self.logger.info(f"Key encoders: {self.key_encoders} -- key decoders: {self.key_decoders}")
         self.classifier = nn.Linear(TRANSFORMER_HDIM, config.data.n_classes).to(self.device)
         # self.key_classifiers = nn.Linear(self.key_dim, config.data.n_classes).to(self.device)
@@ -146,10 +150,16 @@ class EncoderMemory(Learner):
         text_embedding = self.encoder(input_dict)
         key_embeddings = self.encode_keys(text_embedding.detach())
         reconstructions = [key_decoder(key_embedding) for key_decoder, key_embedding in zip(self.key_decoders, key_embeddings)]
-        reconstruction_errors = [
-            # reconstruction should go to original text embedding
-            ((text_embedding.detach() - reconstruction) ** 2).mean() for reconstruction in reconstructions
-        ]
+        if self.config.learner.full_reconstruction:
+            reconstruction_errors = [
+                # reconstruction goes to original text embedding
+                ((text_embedding.detach() - reconstruction) ** 2).mean() for reconstruction in reconstructions
+            ]
+        else:
+            reconstruction_errors = [
+                ((real_embedding.detach() - reconstruction) ** 2).mean()
+                for real_embedding, reconstruction in zip([text_embedding] + key_embeddings[:-1], reconstructions)
+            ]
 
         # query_result = self.memory.query(key_embedding, self.n_neighbours)
         # prediction_embedding = self.decoder(text_embedding, query_result)
