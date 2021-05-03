@@ -118,7 +118,10 @@ class EncoderMemory(Learner):
         loss = loss.item()
         key_losses = [key_loss.item() for key_loss in key_losses]
         # key_loss = 0
-        self.logger.debug(f"Loss: {loss} -- key_loss: {key_losses} -- reconstruction errors: {[re.item() for re in output['reconstruction_errors']]}")
+        self.logger.debug(
+            f"Loss: {loss} -- key_loss: {key_losses}"
+            f" -- reconstruction errors: {[re.item() for re in output['reconstruction_errors']]}"
+        )
         # self.logger.debug(f"Key Loss: {key_loss}")
         return {
             "logits": output["logits"],
@@ -239,7 +242,7 @@ class EncoderMemory(Learner):
         ]
         key_accuracy_str = [f'{km["accuracy"]:.4f}' for km in key_metrics]
         self.logger.info(
-            f"Iteration {self.current_iter + 1} - Task = {self.metrics[-1]{"task"}} - Metrics: Loss = {loss:.4f}, "
+            f"Iteration {self.current_iter + 1} - Task = {self.metrics[-1]['task']} - Metrics: Loss = {loss:.4f}, "
             f"key loss = {[f'{key_loss:.4f}' for key_loss in key_losses]}, "
             f"reconstruction error = {[f'{reconstruction_error:.4f}' for reconstruction_error in reconstruction_errors]}, "
             f"accuracy = {metrics['accuracy']:.4f} - "
