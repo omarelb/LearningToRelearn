@@ -18,11 +18,11 @@ data:
   alternating_relative_frequencies: # How much each task is seen compared to others.
 
 testing:
-  few_shot_batch_size: 1 # for few shot evaluation
+  few_shot_batch_size: 4 # for few shot evaluation
   average_accuracy: true # whether to compute average accuracy on all datasets
   few_shot: true # whether to perform few shot evaluation
-  eval_dataset: yelp # which dataset to perform few shot evaluation on
-  n_samples: 32 # how many samples train on during few shot evaluation
+  eval_dataset: amazon # which dataset to perform few shot evaluation on
+  n_samples: 256 # how many samples to train on during few shot evaluation
   few_shot_validation_size: 100 # sample a subset so validation doesn't take too long during few shot evaluation
   average_validation_size: # sample a subset so validation doesn't take too long during computation of average accuracy. use for debugging purposes
 
