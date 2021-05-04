@@ -83,7 +83,8 @@ def main(config):
         datasets = get_datasets(learner.data_dir, config.data.order, debug=config.debug_data)
         learner.training(datasets)
         learner.write_metrics()
-        learner.save_checkpoint()
+        if config.save_checkpoint:
+            learner.save_checkpoint()
     else:
         # no training, just evaluate
         experiment_path = Path(hydra.utils.to_absolute_path(EXPERIMENT_DIR / config.evaluate))

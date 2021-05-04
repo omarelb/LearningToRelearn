@@ -12,7 +12,7 @@ import wandb
 
 from LearningToRelearn.learner import flatten_dict
 
-def learning_curve_area(performances, batch_wise=False, zero_shot_difference=False):
+def learning_curve_area(performances, zero_shot_difference=False):
     """
     Return area under learning curve given performance measurements.
 
@@ -20,9 +20,6 @@ def learning_curve_area(performances, batch_wise=False, zero_shot_difference=Fal
     ---
     performances: List[Dict]
         Each entry contains a dictionary with at least keys {'examples_seen', 'accuracy'}.
-    batch_wise: bool
-        If true, normalization is done batch wise instead of using the 'examples_seen' information.
-        Set this to true if the batch size used during evaluation is > 1.
     zero_shot_difference: bool
         If true, the zero shot accuracy is subtracted from every measurement, giving an indication of
         how fast it is learning compared to its baseline.
@@ -31,6 +28,10 @@ def learning_curve_area(performances, batch_wise=False, zero_shot_difference=Fal
     ---
     Dict[int, float] mapping learning curve area at k to its corresponding measurement.
     """
+    # normalization is done batch wise instead of using the 'examples_seen' information, when
+    # few shot evaluation batch size > 1
+    if len(performances) > 1 and performances[1]["examples_seen"] - performances[0]["examples_seen"] > 1:
+        batch_wise = True
     result = {}
     area = 0
     for i, performance in enumerate(performances):
@@ -89,7 +90,7 @@ def collect_results(metrics):
     # task that was evaluated
     if "few_shot" in metrics["evaluation"]:
         results["eval_task"] = metrics["evaluation"]["few_shot"][0]["task"]
-        results["few_shot_learning_curve_area"] = learning_curve_area(metrics["evaluation"]["few_shot"], batch_wise=False)
+        results["few_shot_learning_curve_area"] = learning_curve_area(metrics["evaluation"]["few_shot"])
         results["few_shot_learning_speed"] = learning_slope(metrics["evaluation"]["few_shot"])
     # validation accuracy after training on k samples, for multiple k
     # results["few_shot_accuracy"] = metrics["evaluation"]["few_shot"]
