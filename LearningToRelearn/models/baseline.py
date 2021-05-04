@@ -35,10 +35,10 @@ class Baseline(Learner):
     def training(self, datasets, **kwargs):
         # train_datasets = {dataset_name: dataset for dataset_name, dataset in zip(datasets["order"], datasets["train"])}
         train_datasets = datasets_dict(datasets["train"], datasets["order"])
-        samples_per_task = self.config.learner.samples_per_task
 
+        samples_per_task = self.config.learner.samples_per_task
         order = self.config.task_order if self.config.task_order is not None else datasets["order"]
-        n_samples = [samples_per_task] * len(order) if samples_per_task is not None else samples_per_task
+        n_samples = [samples_per_task] * len(order) if samples_per_task is None else samples_per_task
         if self.type == "sequential":
             # if task_order is specified, use that instead of datasets["order"]
             self.logger.info(f"Using task order {order}")

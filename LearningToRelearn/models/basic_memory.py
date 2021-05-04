@@ -103,7 +103,7 @@ class BasicMemory(Learner):
 
         samples_per_task = self.config.learner.samples_per_task
         order = self.config.task_order if self.config.task_order is not None else datasets["order"]
-        n_samples = [samples_per_task] * len(order) if samples_per_task is not None else samples_per_task
+        n_samples = [samples_per_task] * len(order) if samples_per_task is None else samples_per_task
         dataset = get_continuum(train_datasets, order=order, n_samples=n_samples)
         dataloader = DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False)
 
