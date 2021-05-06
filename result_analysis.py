@@ -3,6 +3,7 @@ Analyzes training and testing runs, writing summary statistics to a file and gen
 """
 
 from pathlib import Path
+import sys
 import json
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -30,8 +31,7 @@ def learning_curve_area(performances, zero_shot_difference=False):
     """
     # normalization is done batch wise instead of using the 'examples_seen' information, when
     # few shot evaluation batch size > 1
-    if len(performances) > 1 and performances[1]["examples_seen"] - performances[0]["examples_seen"] > 1:
-        batch_wise = True
+    batch_wise = (len(performances) > 1) and (performances[1]["examples_seen"] - performances[0]["examples_seen"] > 1)
     result = {}
     area = 0
     for i, performance in enumerate(performances):
@@ -80,7 +80,9 @@ def collect_results(metrics):
     """
     results = {}
     # return online accuracy, the average accuracy during training.
-    results["online_accuracy"] = pd.DataFrame(metrics["online"]).accuracy.mean()
+    online_df = pd.DataFrame(metrics["online"])
+    if "accuracy" in online_df.columns:
+        results["online_accuracy"] = online_df.accuracy.mean()
     # mean accuracy over all evaluation datasets
     if "average" in metrics["evaluation"]:
         results["average_accuracy"] = metrics["evaluation"]["average"]["accuracy"]
@@ -91,6 +93,8 @@ def collect_results(metrics):
     if "few_shot" in metrics["evaluation"]:
         results["eval_task"] = metrics["evaluation"]["few_shot"][0]["task"]
         results["few_shot_learning_curve_area"] = learning_curve_area(metrics["evaluation"]["few_shot"])
+        results["few_shot_learning_curve_area_difference"] = learning_curve_area(metrics["evaluation"]["few_shot"],
+                                                                                 zero_shot_difference=True)
         results["few_shot_learning_speed"] = learning_slope(metrics["evaluation"]["few_shot"])
     # validation accuracy after training on k samples, for multiple k
     # results["few_shot_accuracy"] = metrics["evaluation"]["few_shot"]
@@ -149,14 +153,15 @@ def analyze_results(metrics_path=None, metrics=None, write_path=None, use_wandb=
         subprocess.call(f"pdfcrop {img} {img}", shell=True)
 
     # Online accuracy
-    plt.figure(figsize=figsize)
-    plt.plot(online_df["accuracy"])
-    if use_wandb:
-        wandb.log({"chart_online_accuracy": plt})
-    img = img_path / "online_accuracy.pdf"
-    plt.savefig(img)
-    # crop the image
-    subprocess.call(f"pdfcrop {img} {img}", shell=True)
+    if "accuracy" in online_df.columns:
+        plt.figure(figsize=figsize)
+        plt.plot(online_df["examples_seen"], online_df["accuracy"])
+        if use_wandb:
+            wandb.log({"chart_online_accuracy": plt})
+        img = img_path / "online_accuracy.pdf"
+        plt.savefig(img)
+        # crop the image
+        subprocess.call(f"pdfcrop {img} {img}", shell=True)
 
     if "few_shot_learning_curve_area" in results:
         # Few shot learning curve area
@@ -167,6 +172,18 @@ def analyze_results(metrics_path=None, metrics=None, write_path=None, use_wandb=
         if use_wandb:
             wandb.log({"chart_few_shot_lca": plt})
         img = img_path / "few_shot_learning_curve_area.pdf"
+        plt.savefig(img)
+        subprocess.call(f"pdfcrop {img} {img}", shell=True)
+
+    if "few_shot_learning_curve_area" in results:
+        # Few shot learning curve area
+        plt.figure(figsize=figsize)
+        x = list(results["few_shot_learning_curve_area_difference"].keys())
+        y = list(results["few_shot_learning_curve_area_difference"].values())
+        plt.plot(x, y)
+        if use_wandb:
+            wandb.log({"chart_few_shot_lca_zero_shot_difference": plt})
+        img = img_path / "few_shot_learning_curve_area_difference.pdf"
         plt.savefig(img)
         subprocess.call(f"pdfcrop {img} {img}", shell=True)
 
@@ -193,3 +210,6 @@ def analyze_results(metrics_path=None, metrics=None, write_path=None, use_wandb=
     # subprocess.call(f"pdfcrop {img} {img}", shell=True)
 
     return results_flattened
+
+if __name__ == "__main__":
+    analyze_results(metrics_path=Path('experiments') / sys.argv[1])
