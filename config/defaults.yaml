@@ -11,6 +11,7 @@ learner:
   meta_lr: 1e-5
   model_name: bert-base-uncased
   samples_per_task: # default None, which uses all data of each task
+  evaluation_support_set: false # for meta learning methods, whether to use a support set when evaluating
 
 data:
   alternating_tasks: # Which tasks to alternate between. If none, uses all tasks
@@ -36,7 +37,7 @@ replay_every: 9600 # Number of data points between replay
 updates: 5 # number of inner loop updates
 clip_grad_norm: 25 # gradient norm clipping (for replay learner)
 checkpoint_while_training: true # whether to checkpoint while training
-save_checkpoint: true # whether to save checkpoint after training
+save_checkpoint: false # whether to save checkpoint after training
 save_optimizer_state: false # whether to save the optimizer state when checkpointing
 delete_previous_checkpoint: true # whether to overwrite the previous checkpoint when saving a checkpoint
 save_freq: 60 # in minutes, specifies how often a model is saved
