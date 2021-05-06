@@ -130,30 +130,25 @@ class ANML(Learner):
                 self.meta_optimizer.zero_grad()
 
     def forward(self, text, labels, prediction_network, no_grad=False):
-        # if no_grad:
-        #     with torch.no_grad():
-        #         input_dict = self.pn.encode_text(text)
-        #         representation = prediction_network(input_dict, out_from="transformers")
-        #         modulation = self.nm(input_dict)
-        #         logits = prediction_network(representation * modulation, out_from="linear")
-        # else:
-        input_dict = self.pn.encode_text(text)
-        representation = prediction_network(input_dict, out_from="transformers")
-        modulation = self.nm(input_dict)
-        modulated_representation = representation * modulation
-        logits = prediction_network(modulated_representation, out_from="linear")
-        self.logger.debug("forward pass")
-        self.logger.debug(f"representation -- {representation.shape} ")
-        self.logger.debug(f"modulation -- {modulation.shape}")
-        self.logger.debug(f"modulated representation -- {modulated_representation.shape}")
+        if no_grad:
+            with torch.no_grad():
+                input_dict = self.pn.encode_text(text)
+                representation = prediction_network(input_dict, out_from="transformers")
+                modulation = self.nm(input_dict)
+                logits = prediction_network(representation * modulation, out_from="linear")
+        else:
+            input_dict = self.pn.encode_text(text)
+            representation = prediction_network(input_dict, out_from="transformers")
+            modulation = self.nm(input_dict)
+            modulated_representation = representation * modulation
+            logits = prediction_network(modulated_representation, out_from="linear")
 
         return {"logits": logits}
 
     def update_meta_gradients(self, loss, fpn):
         # NM meta gradients
         nm_params = [p for p in self.nm.parameters() if p.requires_grad]
-        self.logger.debug(f"nm_params: {nm_params}")
-        meta_nm_grads = torch.autograd.grad(loss, nm_params, retain_graph=True)
+        meta_nm_grads = torch.autograd.grad(loss, nm_params, retain_graph=True, allow_unused=True)
         for param, meta_grad in zip(nm_params, meta_nm_grads):
             if param.grad is not None:
                 param.grad += meta_grad.detach()
@@ -162,7 +157,7 @@ class ANML(Learner):
 
         # PN meta gradients
         pn_params = [p for p in fpn.parameters() if p.requires_grad]
-        meta_pn_grads = torch.autograd.grad(loss, pn_params)
+        meta_pn_grads = torch.autograd.grad(loss, pn_params, allow_unused=True)
         pn_params = [p for p in self.pn.parameters() if p.requires_grad]
         for param, meta_grad in zip(pn_params, meta_pn_grads):
             if param.grad is not None:
