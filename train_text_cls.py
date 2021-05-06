@@ -5,6 +5,9 @@ from argparse import ArgumentParser
 from pathlib import Path
 from datetime import datetime
 import json
+import warnings
+# get rid of pytorch warning about copying tensors
+warnings.filterwarnings("ignore", message=".*To copy construct from a tensor.*")
 
 import numpy as np
 import torch
