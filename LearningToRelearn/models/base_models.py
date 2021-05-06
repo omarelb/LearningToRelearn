@@ -65,7 +65,7 @@ class TransformerRLN(nn.Module):
 
     def forward(self, inputs):
         last_hidden_state = self.encoder(inputs["input_ids"], attention_mask=inputs["attention_mask"])[0]
-        cls_representation = last_hidden_state[:,0,:]
+        cls_representation = last_hidden_state[: ,0, :]
         return cls_representation
 
 
@@ -85,12 +85,8 @@ class TransformerNeuromodulator(nn.Module):
     def __init__(self, model_name, device):
         super().__init__()
         self.device = device
-        if model_name == "albert":
-            self.encoder = AlbertModel.from_pretrained("albert-base-v2")
-        elif model_name == "bert":
-            self.encoder = BertModel.from_pretrained("bert-base-uncased")
-        else:
-            raise ValueError(f"Specify a valid model name. Current model name: {model_name}")
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.encoder = AutoModel.from_pretrained(model_name)
         self.encoder.requires_grad = False
         self.linear = nn.Sequential(nn.Linear(TRANSFORMER_HDIM, TRANSFORMER_HDIM),
                                     nn.ReLU(),
@@ -99,8 +95,9 @@ class TransformerNeuromodulator(nn.Module):
         self.to(self.device)
 
     def forward(self, inputs, out_from="full"):
-        _, out = self.encoder(inputs["input_ids"], attention_mask=inputs["attention_mask"])
-        out = self.linear(out)
+        last_hidden_state = self.encoder(inputs["input_ids"], attention_mask=inputs["attention_mask"])[0]
+        cls_representation = last_hidden_state[:, 0, :]  # cls representation
+        out = self.linear(cls_representation)
         return out
 
 
@@ -255,7 +252,7 @@ class MemoryStore:
                 ix_counts = Counter(query_result["ix"].flatten().tolist())
                 for ix, count in ix_counts.items():
                     relevance_mask[ix] = count
-                relevance_mask[ixs] = 1 # assign a relevance of 1 to newly added entries as well
+                relevance_mask[ixs] = 1  # assign a relevance of 1 to newly added entries as well
                 # keep exponential moving average
                 self.memory_relevance = self.relevance_discount * self.memory_relevance + relevance_mask
 
