@@ -93,6 +93,7 @@ class ANML(Learner):
             # Inner loop
             for text, labels in support_set:
                 labels = torch.tensor(labels).to(self.device)
+                # labels = labels.to(self.device)
                 output = self.forward(text, labels, fpn)
                 loss = self.loss_fn(output["logits"], labels)
                 diffopt.step(loss)
@@ -111,7 +112,7 @@ class ANML(Learner):
             if query_set is not None:
                 for text, labels in query_set:
                     labels = torch.tensor(labels).to(self.device)
-                    # labels = labels.clone().detach().to(self.device)
+                    # labels = labels.to(self.device)
                     output = self.forward(text, labels, fpn)
                     loss = self.loss_fn(output["logits"], labels)
                     self.update_meta_gradients(loss, fpn)
@@ -150,20 +151,22 @@ class ANML(Learner):
         nm_params = [p for p in self.nm.parameters() if p.requires_grad]
         meta_nm_grads = torch.autograd.grad(loss, nm_params, retain_graph=True, allow_unused=True)
         for param, meta_grad in zip(nm_params, meta_nm_grads):
-            if param.grad is not None:
-                param.grad += meta_grad.detach()
-            else:
-                param.grad = meta_grad.detach()
+            if meta_grad is not None:
+                if param.grad is not None:
+                    param.grad += meta_grad.detach()
+                else:
+                    param.grad = meta_grad.detach()
 
         # PN meta gradients
         pn_params = [p for p in fpn.parameters() if p.requires_grad]
         meta_pn_grads = torch.autograd.grad(loss, pn_params, allow_unused=True)
         pn_params = [p for p in self.pn.parameters() if p.requires_grad]
         for param, meta_grad in zip(pn_params, meta_pn_grads):
-            if param.grad is not None:
-                param.grad += meta_grad.detach()
-            else:
-                param.grad = meta_grad.detach()
+            if meta_grad is not None:
+                if param.grad is not None:
+                    param.grad += meta_grad.detach()
+                else:
+                    param.grad = meta_grad.detach()
 
     def update_support_tracker(self, loss, pred, labels):
         self.tracker["support_loss"].append(loss.item())
@@ -235,6 +238,7 @@ class ANML(Learner):
                 support_loss = []
                 for text, labels in support_set:
                     labels = torch.tensor(labels).to(self.device)
+                    # labels = labels.to(self.device)
                     output = self.forward(text, labels, fpn)
                     loss = self.loss_fn(output["logits"], labels)
                     diffopt.step(loss)
@@ -254,6 +258,7 @@ class ANML(Learner):
             all_losses, all_predictions, all_labels = [], [], []
             for i, (text, labels, datasets) in enumerate(dataloader):
                 labels = torch.tensor(labels).to(self.device)
+                # labels = labels.to(self.device)
                 output = self.forward(text, labels, prediction_network, no_grad=True)
                 loss = self.loss_fn(output["logits"], labels)
                 loss = loss.item()
@@ -379,6 +384,7 @@ class ANML(Learner):
         # Inner loop
         for i, (text, labels, datasets) in enumerate(train_dataloader):
             labels = torch.tensor(labels).to(self.device)
+            # labels = labels.to(self.device)
             output = self.forward(text, labels, self.pn)
             loss = self.loss_fn(output["logits"], labels)
             self.inner_optimizer.zero_grad()
