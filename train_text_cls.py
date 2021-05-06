@@ -96,7 +96,7 @@ def main(config):
         datasets = get_datasets(learner.data_dir, config.data.order, debug=config.debug_data)
 
     # validation set
-    logger.info("----------Validation starts here----------")
+    logger.info("----------Validation starts here----------\n")
     learner.testing(datasets["val"], order=datasets["order"])
     learner.write_metrics()
     validation_results = analyze_results(metrics_path=learner.results_dir / METRICS_FILE,
@@ -116,6 +116,8 @@ def main(config):
         # wandb.log(validation_results)
         # wandb.log(mean_test_results)
         learner.wandb_run.finish()
+
+    logger.info("------------------------- Run Finished -------------------------")
 
     # write results to a file
     # write_results(config, mean_validation_results, mean_test_results)
