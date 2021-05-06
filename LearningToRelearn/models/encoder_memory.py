@@ -81,7 +81,7 @@ class EncoderMemory(Learner):
             # for logging
             key_predictions = [
                 model_utils.make_prediction(key_logits.detach()) for key_logits in output["key_logits"]
-            ] 
+            ]
             # self.logger.debug(f"accuracy prediction from key embedding: {key_metrics['accuracy']}")
 
             self.update_tracker(output, predictions, key_predictions, labels)

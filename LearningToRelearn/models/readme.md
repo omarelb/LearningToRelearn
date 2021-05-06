@@ -9,6 +9,7 @@ Each learner should implement the following methods:
 - training: training loop
 - testing
 - set_eval: setting all model parts to eval mode. For learners with only a single model, this just means doing self.model.eval(). Learners that only do this don't have to implement this method.
+- implement reset_tracker and update_tracker methods if necessary.
 
 Each model should do the following in their training loop:
 - adding training accuracy to the metrics at every iteration, using 

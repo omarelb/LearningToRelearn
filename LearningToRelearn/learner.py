@@ -249,7 +249,7 @@ class Learner:
         # TODO: evaluate on all datasets instead of just one.
         dataset = datasets[self.config.testing.eval_dataset]
 
-        self.logger.info(f"few shot testing on dataset {self.config.testing.eval_dataset}"
+        self.logger.info(f"few shot testing on dataset {self.config.testing.eval_dataset} "
                          f"with {self.config.testing.n_samples} samples")
 
         # split into training and testing point, assumes there is no meaningful difference in dataset order
