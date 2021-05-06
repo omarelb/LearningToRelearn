@@ -36,37 +36,20 @@ class Baseline(Learner):
         # train_datasets = {dataset_name: dataset for dataset_name, dataset in zip(datasets["order"], datasets["train"])}
         train_datasets = datasets_dict(datasets["train"], datasets["order"])
 
-        samples_per_task = self.config.learner.samples_per_task
-        order = self.config.task_order if self.config.task_order is not None else datasets["order"]
-        n_samples = [samples_per_task] * len(order) if samples_per_task is None else samples_per_task
-        if self.type == "sequential":
-            # if task_order is specified, use that instead of datasets["order"]
-            self.logger.info(f"Using task order {order}")
-            for train_dataset in get_continuum(train_datasets, order=order, n_samples=n_samples, merge=False):
-                self.logger.info("Training on {}".format(train_dataset.__class__.__name__))
-                train_dataloader = DataLoader(train_dataset, batch_size=self.mini_batch_size, shuffle=False)
-                self.train(dataloader=train_dataloader, datasets=datasets)
-        elif self.type == "multitask":
-            self.logger.info("Training multi-task model on all datasets")
-            data = get_continuum(train_datasets, order=order, n_samples=n_samples)
-            train_dataloader = DataLoader(data, batch_size=self.mini_batch_size, shuffle=True)
-            self.train(dataloader=train_dataloader, datasets=datasets)
-        elif self.type == "single":
-            # train on a single task / dataset
-            self.logger.info(f"Training single model on dataset {self.config.learner.dataset}")
-            n_samples = [samples_per_task] if samples_per_task is not None else None
-            data = get_continuum(train_datasets, order=[self.config.learner.dataset], n_samples=n_samples)
-            train_dataloader = DataLoader(data, batch_size=self.mini_batch_size, shuffle=True)
-            self.train(dataloader=train_dataloader, datasets=datasets)
-        elif self.type == "alternating":
+        if self.type == "alternating":
             order, n_samples = alternating_order(train_datasets, tasks=self.config.data.alternating_tasks,
                                                  n_samples_per_switch=self.config.data.alternating_n_samples_per_switch,
                                                  relative_frequencies=self.config.data.alternating_relative_frequencies)
-            dataset = get_continuum(train_datasets, order=order, n_samples=n_samples)
-            train_dataloader = DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False)
-            self.train(dataloader=train_dataloader, datasets=datasets)
         else:
-            raise ValueError("Invalid training mode")
+            samples_per_task = self.config.learner.samples_per_task
+            order = self.config.task_order if self.config.task_order is not None else datasets["order"]
+            n_samples = samples_per_task
+            if samples_per_task is not None and isinstance(samples_per_task, int):
+                n_samples = [samples_per_task] * len(order)
+        shuffle = self.type == "multitask"
+        data = get_continuum(train_datasets, order=order, n_samples=n_samples)
+        train_dataloader = DataLoader(data, batch_size=self.mini_batch_size, shuffle=shuffle)
+        self.train(dataloader=train_dataloader, datasets=datasets)
 
     def train(self, dataloader=None, datasets=None):
         val_datasets = datasets_dict(datasets["val"], datasets["order"])
@@ -145,8 +128,8 @@ class Baseline(Learner):
             all_losses.append(loss)
             all_predictions.extend(pred.tolist())
             all_labels.extend(labels.tolist())
-            if i % 20 == 0:
-                self.logger.info(f"Batch {i + 1}/{len(dataloader)} processed")
+            # if i % 20 == 0:
+            #     self.logger.info(f"Batch {i + 1}/{len(dataloader)} processed")
 
         metrics = model_utils.calculate_metrics(all_predictions, all_labels)
         self.logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
