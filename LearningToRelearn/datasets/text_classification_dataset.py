@@ -430,3 +430,14 @@ def datasets_dict(datasets, order):
     order: List[str]
     """
     return {dataset_name: dataset for dataset_name, dataset in zip(order, datasets)}
+
+
+def n_samples_order(samples_per_task, task_order, datasets_order):
+    """
+    Process edge cases of the samples_per_task and task_order config variables.
+    """
+    order = task_order if task_order is not None else datasets_order
+    n_samples = samples_per_task
+    if samples_per_task is not None and isinstance(samples_per_task, int):
+        n_samples = [samples_per_task] * len(order)
+    return n_samples, order

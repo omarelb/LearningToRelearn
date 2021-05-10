@@ -320,7 +320,7 @@ class Learner:
     def replay_parameters(self):
         if self.replay_rate != 0:
             replay_batch_freq = self.replay_every // self.mini_batch_size
-            replay_freq = int(math.ceil((replay_batch_freq + 1) / (self.config.updates + 1)))
+            replay_freq = int(math.ceil((replay_batch_freq + 1) / (self.config.learner.updates + 1)))
             replay_steps = int(self.replay_every * self.replay_rate / self.mini_batch_size)
         else:
             replay_freq = 0
@@ -467,6 +467,7 @@ class Learner:
         If learner has multiple models, this method should be overwritten.
         """
         self.model.eval()
+
 
 def flatten_dict(d, parent_key='', sep='_'):
     items = []
