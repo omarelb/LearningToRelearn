@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=anml
+#SBATCH --job-name=maml
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=3
 #SBATCH --time=10:00:00
@@ -18,7 +18,7 @@ module load Python/3.8.2-GCCcore-9.3.0
 . venv/bin/activate
 
 # python train_text_cls.py learner=anml name=debug wandb=false
-python train_text_cls.py learner=anml testing.n_samples=1024 name=general-anml learner.evaluation_support_set=true
+python train_text_cls.py learner=maml testing.n_samples=1024 name=general-maml
 
 
 # python train_text_cls.py learner=anml name=test-mrelearning\

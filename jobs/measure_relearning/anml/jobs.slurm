@@ -24,9 +24,9 @@ module load Python/3.8.2-GCCcore-9.3.0
 # Dimension -- How many samples in between:
 
 # 1) t_1 (5000), t_2 (2000), t_1 (evaluate)
-python train_text_cls.py learner=anml name=measure-relearning-anml-1\
-                        task_order=[amazon,yahoo] learner.samples_per_task=[5000,2000]\
-                        testing.eval_dataset=amazon testing.n_samples=256 testing.few_shot_batch_size=1
+# python train_text_cls.py learner=anml name=measure-relearning-anml-1\
+#                         task_order=[amazon,yahoo] learner.samples_per_task=[5000,2000]\
+#                         testing.eval_dataset=amazon testing.n_samples=256 testing.few_shot_batch_size=1
 
 # 2) t_1 (5000), t_2 (5000), t_1 (evaluate)
 # python train_text_cls.py learner=anml name=measure-relearning-anml-2\
@@ -119,6 +119,21 @@ python train_text_cls.py learner=anml name=measure-relearning-anml-1\
 #                         task_order=[amazon,yahoo,agnews,dbpedia] learner.samples_per_task=[50000,10000,10000,10000]\
 #                         testing.eval_dataset=amazon testing.n_samples=256 testing.few_shot_batch_size=1
 
+# 26) t_1 (50000), t_2 (100000), t_1 (evaluate)
+# python train_text_cls.py learner=anml name=measure-relearning-anml-1024-26\
+#                         task_order=[amazon,yahoo] learner.samples_per_task=[50000,100000]\
+#                         testing.eval_dataset=amazon testing.n_samples=1024 testing.few_shot_batch_size=1
+
+# 27) t_1 (50000), t_2 (50000 (=100000/2)), t_3 (50000), t_1 (evaluate)
+python train_text_cls.py learner=anml name=measure-relearning-anml-1024-27\
+                        task_order=[amazon,yahoo,agnews] learner.samples_per_task=[50000,50000,50000]\
+                        testing.eval_dataset=amazon testing.n_samples=1024 testing.few_shot_batch_size=1
+
+# 28) t_1 (50000), t_2 (33333 (=100000/3)), t_3 (33333), t_4 (33333), t_1 (evaluate)
+# python train_text_cls.py learner=anml name=measure-relearning-anml-1024-28\
+#                         task_order=[amazon,yahoo,agnews,dbpedia] learner.samples_per_task=[50000,33000,33000,33000]\
+#                         testing.eval_dataset=amazon testing.n_samples=1024 testing.few_shot_batch_size=1
+
 # # Dimension -- How many times we observe that task
 # 2) t_1 (5000), t_2 (5000), t_1 (evaluate)
 # 19) t_1 (2500), t_2 (2500), t_1 (2500), t_2 (2500), t_1 (evaluate)
@@ -159,3 +174,8 @@ python train_text_cls.py learner=anml name=measure-relearning-anml-1\
 # python train_text_cls.py learner=anml name=measure-relearning-anml-25\
 #                         task_order=[amazon] learner.samples_per_task=[0]\
 #                         testing.eval_dataset=amazon testing.n_samples=2048 testing.few_shot_batch_size=1
+
+# 29) A whole lot of samples
+# python train_text_cls.py learner=anml name=measure-relearning-anml-1024-29\
+#                         task_order=[amazon,yahoo,agnews,dbpedia] learner.samples_per_task=[50000,115000,115000,115000]\
+#                         testing.eval_dataset=amazon testing.n_samples=1024 testing.few_shot_batch_size=1

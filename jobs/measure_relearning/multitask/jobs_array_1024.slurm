@@ -1,0 +1,12 @@
+learner=multitask name=measure-relearning-multitask-1 task_order=[amazon,yahoo] learner.samples_per_task=5000 testing.eval_dataset=amazon testing.n_samples=1024 testing.few_shot_batch_size=1
+learner=multitask name=measure-relearning-multitask-2 task_order=[amazon,yahoo,agnews] learner.samples_per_task=5000 testing.eval_dataset=amazon testing.n_samples=1024 testing.few_shot_batch_size=1
+learner=multitask name=measure-relearning-multitask-3 task_order=[amazon,yahoo,agnews,dbpedia] learner.samples_per_task=5000 testing.eval_dataset=amazon testing.n_samples=1024 testing.few_shot_batch_size=1
+learner=multitask name=measure-relearning-multitask-1 task_order=[amazon,yahoo] learner.samples_per_task=10000 testing.eval_dataset=amazon testing.n_samples=1024 testing.few_shot_batch_size=1
+learner=multitask name=measure-relearning-multitask-2 task_order=[amazon,yahoo,agnews] learner.samples_per_task=10000 testing.eval_dataset=amazon testing.n_samples=1024 testing.few_shot_batch_size=1
+learner=multitask name=measure-relearning-multitask-3 task_order=[amazon,yahoo,agnews,dbpedia] learner.samples_per_task=10000 testing.eval_dataset=amazon testing.n_samples=1024 testing.few_shot_batch_size=1
+learner=multitask name=measure-relearning-multitask-1 task_order=[amazon,yahoo] learner.samples_per_task=20000 testing.eval_dataset=amazon testing.n_samples=1024 testing.few_shot_batch_size=1
+learner=multitask name=measure-relearning-multitask-2 task_order=[amazon,yahoo,agnews] learner.samples_per_task=20000 testing.eval_dataset=amazon testing.n_samples=1024 testing.few_shot_batch_size=1
+learner=multitask name=measure-relearning-multitask-3 task_order=[amazon,yahoo,agnews,dbpedia] learner.samples_per_task=20000 testing.eval_dataset=amazon testing.n_samples=1024 testing.few_shot_batch_size=1
+learner=multitask name=measure-relearning-multitask-1 task_order=[amazon,yahoo] testing.eval_dataset=amazon testing.n_samples=1024 testing.few_shot_batch_size=1
+learner=multitask name=measure-relearning-multitask-2 task_order=[amazon,yahoo,agnews] testing.eval_dataset=amazon testing.n_samples=1024 testing.few_shot_batch_size=1
+learner=multitask name=measure-relearning-multitask-3 task_order=[amazon,yahoo,agnews,dbpedia] testing.eval_dataset=amazon testing.n_samples=1024 testing.few_shot_batch_size=1

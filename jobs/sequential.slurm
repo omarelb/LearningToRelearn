@@ -17,6 +17,7 @@ module load Python/3.8.2-GCCcore-9.3.0
 # activate virtual environment
 . venv/bin/activate
 
-python train_text_cls.py learner=sequential name=sequential-test learner.samples_per_task=8000 \
-                        testing.average_validation_size=32
+python train_text_cls.py learner=sequential name=general-sequential \
+                         training.validate_freq=100 \
+                         testing.n_samples=1024
 
