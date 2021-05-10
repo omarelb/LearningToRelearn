@@ -16,10 +16,8 @@ import LearningToRelearn.datasets.utils as dataset_utils
 import LearningToRelearn.models.utils as model_utils
 from LearningToRelearn.models.base_models import ReplayMemory, TransformerClsModel, TransformerNeuromodulator
 from LearningToRelearn.learner import Learner
-from LearningToRelearn.datasets.text_classification_dataset import get_continuum, datasets_dict
+from LearningToRelearn.datasets.text_classification_dataset import get_continuum, datasets_dict, n_samples_order
 
-# logging.basicConfig(level="INFO", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-# logger = logging.getLogger("ANML-Log")
 
 class ANML(Learner):
     def __init__(self, config, **kwargs):
@@ -27,9 +25,9 @@ class ANML(Learner):
 
         self.inner_lr = config.learner.inner_lr
         self.meta_lr = config.learner.meta_lr
-        self.write_prob = config.write_prob
-        self.replay_rate = config.replay_rate
-        self.replay_every = config.replay_every
+        self.write_prob = config.learner.write_prob
+        self.replay_rate = config.learner.replay_rate
+        self.replay_every = config.learner.replay_every
         self.mini_batch_size = config.training.batch_size
 
         self.nm = TransformerNeuromodulator(model_name=config.learner.model_name,
@@ -57,29 +55,21 @@ class ANML(Learner):
         self.logger.info("Replay frequency: {}".format(replay_freq))
         self.logger.info("Replay steps: {}".format(replay_steps))
 
-        samples_per_task = self.config.learner.samples_per_task
-        order = self.config.task_order if self.config.task_order is not None else datasets["order"]
-        n_samples = samples_per_task
-        if samples_per_task is not None and isinstance(samples_per_task, int):
-            n_samples = [samples_per_task] * len(order)
+        n_samples, order = n_samples_order(self.config.learner.samples_per_task, self.config.task_order, datasets["order"])
         data = get_continuum(train_datasets, order=order, n_samples=n_samples)
         train_dataloader = iter(DataLoader(data, batch_size=self.mini_batch_size, shuffle=False))
-        n_episodes = len(train_dataloader) // self.config.updates
+        n_episodes = len(train_dataloader) // self.config.learner.updates
 
         # iterate over episodes
         while True:
             self.set_train()
             support_set = self.get_support_set(train_dataloader)
+            # TODO: return flag that indicates whether the query set is from the memory. Don't include this in the online accuracy calc
             query_set = self.get_query_set(train_dataloader, replay_freq, replay_steps)
             if support_set is None or query_set is None:
                 return
 
             self.training_step(support_set, query_set)
-            # self.metrics["online"].append({
-            #     "accuracy": online_metrics["accuracy"],
-            #     "examples_seen": self.examples_seen(),
-            #     "task": datasets[0]  # assumes whole batch is from same task
-            # })
 
             self.log()
             self.write_metrics()
@@ -223,7 +213,7 @@ class ANML(Learner):
     def evaluate(self, dataloader):
         if self.config.learner.evaluation_support_set:
             support_set = []
-            for _ in range(self.config.updates):
+            for _ in range(self.config.learner.updates):
                 text, labels = self.memory.read_batch(batch_size=self.mini_batch_size)
                 support_set.append((text, labels))
 
@@ -255,6 +245,7 @@ class ANML(Learner):
             else:
                 prediction_network = self.pn
 
+            self.set_eval()
             all_losses, all_predictions, all_labels = [], [], []
             for i, (text, labels, datasets) in enumerate(dataloader):
                 labels = torch.tensor(labels).to(self.device)
@@ -300,7 +291,7 @@ class ANML(Learner):
     def get_support_set(self, data_iterator):
         """Return a list of datapoints, and return None if the end of the data is reached."""
         support_set = []
-        for _ in range(self.config.updates):
+        for _ in range(self.config.learner.updates):
             try:
                 text, labels, _ = next(data_iterator)
                 support_set.append((text, labels))
@@ -314,6 +305,7 @@ class ANML(Learner):
         query_set = []
         if self.replay_rate != 0 and (self.current_iter + 1) % replay_freq == 0:
             # now we replay from memory
+            self.logger.debug("query set read from memory")
             for _ in range(replay_steps):
                 text, labels = self.memory.read_batch(batch_size=self.mini_batch_size)
                 query_set.append((text, labels))

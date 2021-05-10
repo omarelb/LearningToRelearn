@@ -28,9 +28,9 @@ class OML(Learner):
         super().__init__(config, **kwargs)
         self.inner_lr = config.learner.inner_lr
         self.meta_lr = config.learner.meta_lr
-        self.write_prob = config.write_prob
-        self.replay_rate = config.replay_rate
-        self.replay_every = config.replay_every
+        self.write_prob = config.learner.write_prob
+        self.replay_rate = config.learner.replay_rate
+        self.replay_every = config.learner.replay_every
 
         self.rln = TransformerRLN(model_name=config.learner.model_name,
                                   max_length=config.data.max_length,
@@ -72,7 +72,7 @@ class OML(Learner):
                 # Inner loop
                 support_set = []
                 task_predictions, task_labels = [], []
-                for _ in range(self.config.updates):
+                for _ in range(self.config.learner.updates):
                     try:
                         text, labels = next(train_dataloader)
                         support_set.append((text, labels))
@@ -187,7 +187,7 @@ class OML(Learner):
         self.pln.train()
 
         support_set = []
-        for _ in range(self.config.updates):
+        for _ in range(self.config.learner.updates):
             text, labels = self.memory.read_batch(batch_size=self.mini_batch_size)
             support_set.append((text, labels))
 

@@ -21,9 +21,9 @@ class AGEM(Learner):
     def __init__(self, config, **kwargs):
         super().__init__(config, **kwargs)
         self.lr = config.learner.lr
-        self.write_prob = config.write_prob
-        self.replay_rate = config.replay_rate
-        self.replay_every = config.replay_every
+        self.write_prob = config.learner.write_prob
+        self.replay_rate = config.learner.replay_rate
+        self.replay_every = config.learner.replay_every
         self.n_epochs = config.training.epochs
 
         self.model = TransformerClsModel(model_name=config.learner.model_name,

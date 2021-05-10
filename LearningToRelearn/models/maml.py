@@ -19,7 +19,7 @@ from LearningToRelearn.learner import Learner
 from LearningToRelearn.datasets.text_classification_dataset import get_continuum, datasets_dict, n_samples_order
 
 
-class ANML(Learner):
+class MAML(Learner):
     def __init__(self, config, **kwargs):
         super().__init__(config, **kwargs)
 

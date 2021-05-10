@@ -23,9 +23,9 @@ class Replay(Learner):
         super().__init__(config, **kwargs)
 
         self.lr = config.learner.lr
-        self.write_prob = config.write_prob
-        self.replay_rate = config.replay_rate
-        self.replay_every = config.replay_every
+        self.write_prob = config.learner.write_prob
+        self.replay_rate = config.learner.replay_rate
+        self.replay_every = config.learner.replay_every
         self.n_epochs = config.training.epochs
 
         self.model = TransformerClsModel(model_name=config.learner.model_name,
@@ -78,7 +78,7 @@ class Replay(Learner):
 
                     # TODO: Ask Nithin why he does this
                     params = [p for p in self.model.parameters() if p.requires_grad]
-                    torch.nn.utils.clip_grad_norm(params, self.config.clip_grad_norm)
+                    torch.nn.utils.clip_grad_norm(params, self.config.learner.clip_grad_norm)
                     self.optimizer.step()
 
                 loss = loss.item()
