@@ -10,6 +10,8 @@ from torch.utils import data
 
 import logging
 
+from torch.utils.data import Dataset, ConcatDataset, Subset
+
 MAX_TRAIN_SIZE = 115000
 MAX_VAL_SIZE = 5000
 MAX_TEST_SIZE = 7600
@@ -94,7 +96,7 @@ def cache_filename(file_path, split, ext=".csv", debug=False):
     return folder / new_name
 
 
-class ClassificationDataset(data.Dataset):
+class ClassificationDataset(Dataset):
     """
     Represents a classification dataset.
 
@@ -291,7 +293,7 @@ def get_datasets(data_path, data_order=1, debug=False):
     }
 
 
-def get_continuum(datasets, order=None, n_samples=None, shuffle=False, merge=True):
+def get_continuum(datasets, order=None, n_samples=None, shuffle=False, merge=True, eval_dataset=None):
     """
     Generate a dataset representing a continuum of tasks.
 
@@ -315,6 +317,9 @@ def get_continuum(datasets, order=None, n_samples=None, shuffle=False, merge=Tru
         If true, the *order* is shuffled (not all datapoints).
     merge: bool
         If true, merge all the datasets into one ConcatDataset. Otherwise, keep it as a list of Subset datasets.
+    eval_dataset: string
+        Which dataset is specified as few shot evaluation dataset. If one of the tasks in the order is `evaluation`,
+        this will be replaced by the evaluation dataset.
 
     Returns
     ---
@@ -323,6 +328,11 @@ def get_continuum(datasets, order=None, n_samples=None, shuffle=False, merge=Tru
     """
     if order is None or len(order) == 0:
         order = [dataset_name for dataset_name in datasets.keys()]
+    if "evaluation" in order:
+        assert eval_dataset is not None, "If `evaluation` is specified as a task, `eval_dataset` needs to be supplied"
+    # from pdb import set_trace; set_trace()
+    evaluation_mapper = lambda x: eval_dataset if x == "evaluation" else x
+    order = [evaluation_mapper(dataset) for dataset in order]
     data_lengths = {dataset_name: len(datasets[dataset_name]) for dataset_name in datasets.keys()}
     # if not specified, use all samples of this dataset
     if n_samples is None or len(n_samples) == 0:
@@ -352,10 +362,10 @@ def get_continuum(datasets, order=None, n_samples=None, shuffle=False, merge=Tru
         ixs = np.random.choice(list(set(range(data_len)) - set(ixs_occupied[dataset_name])), size=n_sample,
                                replace=False)
         ixs_occupied[dataset_name].extend(ixs)
-        result.append(data.Subset(datasets[dataset_name], indices=ixs))
+        result.append(Subset(datasets[dataset_name], indices=ixs))
 
     if merge:
-        return data.ConcatDataset(result)
+        return ConcatDataset(result)
     else:
         return result
 

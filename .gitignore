@@ -519,5 +519,4 @@ slurm-hyper-search
 experiments/
 *.pt
 *.out
-jobs/
 slurm_logs

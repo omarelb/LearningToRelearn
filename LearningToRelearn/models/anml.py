@@ -56,7 +56,7 @@ class ANML(Learner):
         self.logger.info("Replay steps: {}".format(replay_steps))
 
         n_samples, order = n_samples_order(self.config.learner.samples_per_task, self.config.task_order, datasets["order"])
-        data = get_continuum(train_datasets, order=order, n_samples=n_samples)
+        data = get_continuum(train_datasets, order=order, n_samples=n_samples, eval_dataset=self.config.testing.eval_dataset)
         train_dataloader = iter(DataLoader(data, batch_size=self.mini_batch_size, shuffle=False))
         n_episodes = len(train_dataloader) // self.config.learner.updates
 

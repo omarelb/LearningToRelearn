@@ -181,24 +181,31 @@ class Learner:
             wandb.log(to_log)
         return result
 
-    def testing(self, datasets, order):
+    def testing(self, datasets, order, split="val"):
         """
         Evaluate the learner after training.
 
         Parameters
         ---
-        datasets: List[Dataset]
+        datasets: Dict[str, List[Dataset]]
             Test datasets.
         order: List[str]
             Specifies order of encountered datasets
         """
+        datasets = datasets[split]
+        eval_datasets = datasets_dict(datasets, order)
         self.set_eval()
-        testing_datasets = datasets_dict(datasets, order)
 
         if self.config.testing.average_accuracy:
-            self.average_accuracy(testing_datasets)
+            self.average_accuracy(eval_datasets)
         if self.config.testing.few_shot:
-            self.few_shot_testing(testing_datasets)
+            # split into training and testing point, assumes there is no meaningful difference in dataset order
+            dataset = eval_datasets[self.config.testing.eval_dataset]
+            train_dataset = dataset.new(0, self.config.testing.n_samples)
+            eval_dataset = dataset.new(self.config.testing.n_samples, -1)
+            # sample a subset so validation doesn't take too long
+            eval_dataset = eval_dataset.sample(min(self.config.testing.few_shot_validation_size, len(eval_dataset)))
+            self.few_shot_testing(train_dataset=train_dataset, eval_dataset=eval_dataset)
 
     def average_accuracy(self, datasets):
         results = {}
@@ -233,7 +240,7 @@ class Learner:
                 "testing_average_accuracy": mean_results["accuracy"]
             })
 
-    def few_shot_testing(self, datasets):
+    def few_shot_testing(self, train_dataset, eval_dataset, increment_counters=False):
         """
         Allow the model to train on a small amount of datapoints at a time. After every training step,
         evaluate on many samples that haven't been seen yet.
@@ -242,24 +249,21 @@ class Learner:
 
         Parameters
         ---
-        datasets: Dict[str, Dataset]
-            Maps a dataset name to its corresponding dataset object. Should not contain training data.
+        train_dataset: Dataset
+            Contains examples on which the model is trained before being evaluated
+        eval_dataset: Dataset
+            Contains examples on which the model is evaluated
+        increment_counters: bool
+            If True, update online metrics and current iteration counters.
         """
         all_predictions, all_labels = [], []
         # TODO: evaluate on all datasets instead of just one.
-        dataset = datasets[self.config.testing.eval_dataset]
-
         self.logger.info(f"few shot testing on dataset {self.config.testing.eval_dataset} "
-                         f"with {self.config.testing.n_samples} samples")
+                         f"with {len(train_dataset)} samples")
 
-        # split into training and testing point, assumes there is no meaningful difference in dataset order
-        train_dataset = dataset.new(0, self.config.testing.n_samples)
-        test_dataset = dataset.new(self.config.testing.n_samples, -1)
-        # sample a subset so validation doesn't take too long
-        test_dataset = test_dataset.sample(min(self.config.testing.few_shot_validation_size, len(test_dataset)))
-        self.logger.info(f"Validating with test set of size {len(test_dataset)}")
+        self.logger.info(f"Validating with test set of size {len(eval_dataset)}")
         train_dataloader = DataLoader(train_dataset, batch_size=self.config.testing.few_shot_batch_size, shuffle=False)
-        test_dataloader = DataLoader(test_dataset, batch_size=self.mini_batch_size, shuffle=False)
+        test_dataloader = DataLoader(eval_dataset, batch_size=self.mini_batch_size, shuffle=False)
 
         all_predictions, all_labels = [], []
 

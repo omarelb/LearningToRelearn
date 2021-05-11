@@ -31,6 +31,7 @@ testing:
   n_samples: 1024 # how many samples to train on during few shot evaluation
   few_shot_validation_size: 100 # sample a subset so validation doesn't take too long during few shot evaluation
   average_validation_size: # sample a subset so validation doesn't take too long during computation of average accuracy. use for debugging purposes
+  eval_split: val # either "val" or "test", decides which split to use when evaluating
 
 seed: 42 # random seed
 inference: false

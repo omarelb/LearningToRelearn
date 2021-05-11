@@ -47,29 +47,38 @@ class MAML(Learner):
 
     def training(self, datasets, **kwargs):
         train_datasets = datasets_dict(datasets["train"], datasets["order"])
+        val_datasets = datasets_dict(datasets["val"], datasets["order"])
+        eval_dataset = val_datasets[self.config.testing.eval_dataset]
+        eval_dataset = eval_dataset.sample(min(self.config.testing.few_shot_validation_size, len(eval_dataset)))
+
         replay_freq, replay_steps = self.replay_parameters()
         self.logger.info("Replay frequency: {}".format(replay_freq))
         self.logger.info("Replay steps: {}".format(replay_steps))
 
         n_samples, order = n_samples_order(self.config.learner.samples_per_task, self.config.task_order, datasets["order"])
-        data = get_continuum(train_datasets, order=order, n_samples=n_samples)
-        train_dataloader = iter(DataLoader(data, batch_size=self.mini_batch_size, shuffle=False))
-        n_episodes = len(train_dataloader) // self.config.learner.updates
+        datas = get_continuum(train_datasets, order=order, n_samples=n_samples,
+                             eval_dataset=self.config.testing.eval_dataset, merge=False)
+        for data, dataset_name, n_sample in zip(datas, order, n_samples):
+            self.logger.info(f"Observing dataset {dataset_name} for {n_sample} samples. "
+                             f"Evaluation={dataset_name=='evaluation'}")
+            if dataset_name == "evaluation":
+                self.few_shot_testing(train_dataset=data, eval_dataset=eval_dataset, increment_counters=True)
+            else:
+                train_dataloader = iter(DataLoader(data, batch_size=self.mini_batch_size, shuffle=False))
+                # iterate over episodes
+                while True:
+                    self.set_train()
+                    support_set = self.get_support_set(train_dataloader)
+                    # TODO: return flag that indicates whether the query set is from the memory. Don't include this in the online accuracy calc
+                    query_set = self.get_query_set(train_dataloader, replay_freq, replay_steps)
+                    if support_set is None or query_set is None:
+                        break
 
-        # iterate over episodes
-        while True:
-            self.set_train()
-            support_set = self.get_support_set(train_dataloader)
-            # TODO: return flag that indicates whether the query set is from the memory. Don't include this in the online accuracy calc
-            query_set = self.get_query_set(train_dataloader, replay_freq, replay_steps)
-            if support_set is None or query_set is None:
-                return
+                    self.training_step(support_set, query_set)
 
-            self.training_step(support_set, query_set)
-
-            self.log()
-            self.write_metrics()
-            self.current_iter += 1
+                    self.log()
+                    self.write_metrics()
+                    self.current_iter += 1
 
     def training_step(self, support_set, query_set=None):
         self.inner_optimizer.zero_grad()
@@ -190,7 +199,7 @@ class MAML(Learner):
             })
         self.reset_tracker()
 
-    def evaluate(self, dataloader):
+    def evaluate(self, dataloader, prediction_network=None):
         if self.config.learner.evaluation_support_set:
             support_set = []
             for _ in range(self.config.learner.updates):
@@ -202,7 +211,7 @@ class MAML(Learner):
                                 track_higher_grads=False) as (fpn, diffopt):
             if self.config.learner.evaluation_support_set:
                 self.set_train()
-                prediction_network = fpn
+                support_prediction_network = fpn
                 # Inner loop
                 task_predictions, task_labels = [], []
                 support_loss = []
@@ -223,7 +232,9 @@ class MAML(Learner):
                             results["precision"], results["recall"], results["f1"]))
                 self.set_eval()
             else:
-                prediction_network = self.pn
+                support_prediction_network = self.pn
+            if prediction_network is None:
+                prediction_network = support_prediction_network
 
             self.set_eval()
             all_losses, all_predictions, all_labels = [], [], []
@@ -274,7 +285,7 @@ class MAML(Learner):
                 text, labels, _ = next(data_iterator)
                 support_set.append((text, labels))
             except StopIteration:
-                self.logger.info("Terminating training as all the data is seen")
+                # self.logger.info("Terminating training as all the data is seen")
                 return None
         return support_set
 
@@ -295,7 +306,7 @@ class MAML(Learner):
                 self.memory.write_batch(text, labels)
                 self._examples_seen += self.mini_batch_size
             except StopIteration:
-                self.logger.info("Terminating training as all the data is seen")
+                # self.logger.info("Terminating training as all the data is seen")
                 return None
         return query_set
 
@@ -305,7 +316,7 @@ class MAML(Learner):
     def set_train(self):
         self.pn.train()
 
-    def few_shot_testing(self, datasets):
+    def few_shot_testing(self, train_dataset, eval_dataset, increment_counters=False):
         """
         Allow the model to train on a small amount of datapoints at a time. After every training step,
         evaluate on many samples that haven't been seen yet.
@@ -314,31 +325,33 @@ class MAML(Learner):
 
         Parameters
         ---
-        datasets: Dict[str, Dataset]
-            Maps a dataset name to its corresponding dataset object. Should not contain training data.
+        train_dataset: Dataset
+            Contains examples on which the model is trained before being evaluated
+        eval_dataset: Dataset
+            Contains examples on which the model is evaluated
+        increment_counters: bool
+            If True, update online metrics and current iteration counters.
         """
+        if "few_shot" not in self.metrics["evaluation"]:
+            self.metrics["evaluation"]["few_shot"] = []
+            self.metrics["evaluation"]["few_shot_training"] = []
         all_predictions, all_labels = [], []
         # TODO: evaluate on all datasets instead of just one.
-        dataset = datasets[self.config.testing.eval_dataset]
 
         self.logger.info(f"few shot testing on dataset {self.config.testing.eval_dataset} "
-                         f"with {self.config.testing.n_samples} samples")
+                         f"with {len(train_dataset)} samples")
 
         # split into training and testing point, assumes there is no meaningful difference in dataset order
-        train_dataset = dataset.new(0, self.config.testing.n_samples)
-        test_dataset = dataset.new(self.config.testing.n_samples, -1)
-        # sample a subset so validation doesn't take too long
-        test_dataset = test_dataset.sample(min(self.config.testing.few_shot_validation_size, len(test_dataset)))
-        self.logger.info(f"Validating with test set of size {len(test_dataset)}")
+        self.logger.info(f"Validating with test set of size {len(eval_dataset)}")
         train_dataloader = DataLoader(train_dataset, batch_size=self.config.testing.few_shot_batch_size, shuffle=False)
-        test_dataloader = DataLoader(test_dataset, batch_size=self.mini_batch_size, shuffle=False)
+        eval_dataloader = DataLoader(eval_dataset, batch_size=self.mini_batch_size, shuffle=False)
 
         all_predictions, all_labels = [], []
 
         zero_shot = {
             # zero shot accuracy
             "examples_seen": 0,
-            "accuracy": self.evaluate(dataloader=test_dataloader)["accuracy"],
+            "accuracy": self.evaluate(dataloader=eval_dataloader)["accuracy"],
             "task": self.config.testing.eval_dataset
         }
         if self.config.wandb:
@@ -346,38 +359,50 @@ class MAML(Learner):
                 "few_shot_accuracy": zero_shot["accuracy"],
                 "examples_seen": 0
             })
-        self.metrics["evaluation"]["few_shot"] = [zero_shot]
-        self.metrics["evaluation"]["few_shot_training"] = []
+        self.metrics["evaluation"]["few_shot"].append([zero_shot])
+        self.metrics["evaluation"]["few_shot_training"].append([])
 
-        # Inner loop
-        for i, (text, labels, datasets) in enumerate(train_dataloader):
-            labels = torch.tensor(labels).to(self.device)
-            # labels = labels.to(self.device)
-            output = self.forward(text, labels, self.pn)
-            loss = self.loss_fn(output["logits"], labels)
-            self.inner_optimizer.zero_grad()
-            loss.backward()
-            self.inner_optimizer.step()
+        with higher.innerloop_ctx(self.pn, self.inner_optimizer,
+                                copy_initial_weights=False,
+                                track_higher_grads=False) as (fpn, diffopt):
+            # Inner loop
+            for i, (text, labels, datasets) in enumerate(train_dataloader):
+                self.set_train()
+                labels = torch.tensor(labels).to(self.device)
+                # labels = labels.to(self.device)
+                output = self.forward(text, labels, fpn)
+                loss = self.loss_fn(output["logits"], labels)
+                diffopt.step(loss)
 
-            predictions = model_utils.make_prediction(output["logits"].detach())
+                predictions = model_utils.make_prediction(output["logits"].detach())
+                all_predictions.extend(predictions.tolist())
+                all_labels.extend(labels.tolist())
+                online_metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
+                dataset_results = self.evaluate(dataloader=eval_dataloader, prediction_network=fpn)
+                train_results = {
+                    "examples_seen": i * self.config.testing.few_shot_batch_size,
+                    "accuracy": online_metrics["accuracy"],
+                    "task": datasets[0]  # assume whole batch is from same task
+                }
+                test_results = {
+                    "examples_seen": (i + 1) * self.config.testing.few_shot_batch_size,
+                    # "few_shot_train_accuracy": online_metrics["accuracy"],
+                    # "few_shot_test_accuracy": dataset_results["accuracy"],
+                    "accuracy": dataset_results["accuracy"],
+                    "task": datasets[0]
+                }
+                if increment_counters:
+                    self._examples_seen += len(text)
+                    self.metrics["online"].append({
+                        "accuracy": online_metrics["accuracy"],
+                        "examples_seen": self.examples_seen(),
+                    })
+                self.metrics["evaluation"]["few_shot_training"][-1].append(train_results)
+                self.metrics["evaluation"]["few_shot"][-1].append(test_results)
+                if self.config.wandb:
+                    # replace with new name
+                    train_results["few_shot_training_accuracy"] = train_results.pop("accuracy")
+                    test_results["few_shot_test_accuracy"] = test_results.pop("accuracy")
 
-            all_predictions.extend(predictions.tolist())
-            all_labels.extend(labels.tolist())
-            online_metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
-            dataset_results = self.evaluate(dataloader=test_dataloader)
-
-            train_results = {
-                "examples_seen": i * self.config.testing.few_shot_batch_size,
-                "accuracy": online_metrics["accuracy"],
-                "task": datasets[0]  # assume whole batch is from same task
-            }
-            test_results = {
-                "examples_seen": (i + 1) * self.config.testing.few_shot_batch_size,
-                "accuracy": dataset_results["accuracy"],
-                "task": datasets[0]
-            }
-            self.metrics["evaluation"]["few_shot_training"].append(train_results)
-            self.metrics["evaluation"]["few_shot"].append(test_results)
-            if self.config.wandb:
-                wandb.log(train_results)
-                wandb.log(test_results)
+                    wandb.log(train_results)
+                    wandb.log(test_results)
