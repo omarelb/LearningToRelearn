@@ -356,7 +356,7 @@ class MAML(Learner):
         }
         if self.config.wandb:
             wandb.log({
-                "few_shot_accuracy": zero_shot["accuracy"],
+                "few_shot_test_accuracy": zero_shot["accuracy"],
                 "examples_seen": 0
             })
         self.metrics["evaluation"]["few_shot"].append([zero_shot])
@@ -401,8 +401,10 @@ class MAML(Learner):
                 self.metrics["evaluation"]["few_shot"][-1].append(test_results)
                 if self.config.wandb:
                     # replace with new name
-                    train_results["few_shot_training_accuracy"] = train_results.pop("accuracy")
-                    test_results["few_shot_test_accuracy"] = test_results.pop("accuracy")
+                    train_results[f"few_shot_training_accuracy_{self.few_shot_counter}"] = train_results.pop("accuracy")
+                    test_results[f"few_shot_test_accuracy_{self.few_shot_counter}"] = test_results.pop("accuracy")
 
                     wandb.log(train_results)
                     wandb.log(test_results)
+                    
+        self.few_shot_counter += 1

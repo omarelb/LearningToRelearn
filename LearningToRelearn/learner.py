@@ -141,6 +141,8 @@ class Learner:
         # this is used to track metrics of different tasks during training
         self.metrics = collections.defaultdict(dict)
         self.metrics["online"] = []
+        # keeps track of how many times we have performed few shot testing, for logging purposes
+        self.few_shot_counter = 0
         self.reset_tracker()
 
         # specifies which task the learner is currently learning
@@ -256,6 +258,9 @@ class Learner:
         increment_counters: bool
             If True, update online metrics and current iteration counters.
         """
+        if "few_shot" not in self.metrics["evaluation"]:
+            self.metrics["evaluation"]["few_shot"] = []
+            self.metrics["evaluation"]["few_shot_training"] = []
         all_predictions, all_labels = [], []
         # TODO: evaluate on all datasets instead of just one.
         self.logger.info(f"few shot testing on dataset {self.config.testing.eval_dataset} "
@@ -263,14 +268,14 @@ class Learner:
 
         self.logger.info(f"Validating with test set of size {len(eval_dataset)}")
         train_dataloader = DataLoader(train_dataset, batch_size=self.config.testing.few_shot_batch_size, shuffle=False)
-        test_dataloader = DataLoader(eval_dataset, batch_size=self.mini_batch_size, shuffle=False)
+        eval_dataloader = DataLoader(eval_dataset, batch_size=self.mini_batch_size, shuffle=False)
 
         all_predictions, all_labels = [], []
 
         zero_shot = {
             # zero shot accuracy
             "examples_seen": 0,
-            "accuracy": self.evaluate(dataloader=test_dataloader)["accuracy"],
+            "accuracy": self.evaluate(dataloader=eval_dataloader)["accuracy"],
             "task": self.config.testing.eval_dataset
         }
         if self.config.wandb:
@@ -278,8 +283,8 @@ class Learner:
                 "few_shot_accuracy": zero_shot["accuracy"],
                 "examples_seen": 0
             })
-        self.metrics["evaluation"]["few_shot"] = [zero_shot]
-        self.metrics["evaluation"]["few_shot_training"] = []
+        self.metrics["evaluation"]["few_shot"].append([zero_shot])
+        self.metrics["evaluation"]["few_shot_training"].append([])
 
         for i, (text, labels, datasets) in enumerate(train_dataloader):
             output = self.training_step(text, labels)
@@ -288,7 +293,7 @@ class Learner:
             all_predictions.extend(predictions.tolist())
             all_labels.extend(labels.tolist())
             online_metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
-            dataset_results = self.evaluate(dataloader=test_dataloader)
+            dataset_results = self.evaluate(dataloader=eval_dataloader)
 
             train_results = {
                 "examples_seen": i * self.config.testing.few_shot_batch_size,
@@ -300,11 +305,20 @@ class Learner:
                 "accuracy": dataset_results["accuracy"],
                 "task": datasets[0]
             }
-            self.metrics["evaluation"]["few_shot_training"].append(train_results)
-            self.metrics["evaluation"]["few_shot"].append(test_results)
+            if increment_counters:
+                self._examples_seen += len(text)
+                self.metrics["online"].append({
+                    "accuracy": online_metrics["accuracy"],
+                    "examples_seen": self.examples_seen(),
+                })
+            self.metrics["evaluation"]["few_shot_training"][-1].append(train_results)
+            self.metrics["evaluation"]["few_shot"][-1].append(test_results)
             if self.config.wandb:
+                train_results[f"few_shot_training_accuracy_{self.few_shot_counter}"] = train_results.pop("accuracy")
+                test_results[f"few_shot_test_accuracy_{self.few_shot_counter}"] = test_results.pop("accuracy")
                 wandb.log(train_results)
                 wandb.log(test_results)
+        self.few_shot_counter += 1
 
     def reset_tracker(self):
         """Initialize dictionary that stores information about loss, predictions, and labels

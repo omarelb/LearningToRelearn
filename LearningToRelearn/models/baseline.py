@@ -11,7 +11,7 @@ import LearningToRelearn.datasets.utils as dataset_utils
 import LearningToRelearn.models.utils as model_utils
 from LearningToRelearn.models.base_models import TransformerClsModel
 from LearningToRelearn.learner import Learner
-from LearningToRelearn.datasets.text_classification_dataset import get_continuum, alternating_order, datasets_dict
+from LearningToRelearn.datasets.text_classification_dataset import get_continuum, alternating_order, datasets_dict, n_samples_order
 
 
 class Baseline(Learner):
@@ -35,21 +35,27 @@ class Baseline(Learner):
     def training(self, datasets, **kwargs):
         # train_datasets = {dataset_name: dataset for dataset_name, dataset in zip(datasets["order"], datasets["train"])}
         train_datasets = datasets_dict(datasets["train"], datasets["order"])
+        val_datasets = datasets_dict(datasets["val"], datasets["order"])
+        eval_dataset = val_datasets[self.config.testing.eval_dataset]
+        eval_dataset = eval_dataset.sample(min(self.config.testing.few_shot_validation_size, len(eval_dataset)))
 
         if self.type == "alternating":
             order, n_samples = alternating_order(train_datasets, tasks=self.config.data.alternating_tasks,
                                                  n_samples_per_switch=self.config.data.alternating_n_samples_per_switch,
                                                  relative_frequencies=self.config.data.alternating_relative_frequencies)
         else:
-            samples_per_task = self.config.learner.samples_per_task
-            order = self.config.task_order if self.config.task_order is not None else datasets["order"]
-            n_samples = samples_per_task
-            if samples_per_task is not None and isinstance(samples_per_task, int):
-                n_samples = [samples_per_task] * len(order)
+            n_samples, order = n_samples_order(self.config.learner.samples_per_task, self.config.task_order, datasets["order"])
         shuffle = self.type == "multitask"
-        data = get_continuum(train_datasets, order=order, n_samples=n_samples)
-        train_dataloader = DataLoader(data, batch_size=self.mini_batch_size, shuffle=shuffle)
-        self.train(dataloader=train_dataloader, datasets=datasets)
+        datas = get_continuum(train_datasets, order=order, n_samples=n_samples,
+                             eval_dataset=self.config.testing.eval_dataset, merge=False)
+        for data, dataset_name, n_sample in zip(datas, order, n_samples):
+            self.logger.info(f"Observing dataset {dataset_name} for {n_sample} samples. "
+                             f"Evaluation={dataset_name=='evaluation'}")
+            if dataset_name == "evaluation":
+                self.few_shot_testing(train_dataset=data, eval_dataset=eval_dataset, increment_counters=True)
+            else:
+                train_dataloader = DataLoader(data, batch_size=self.mini_batch_size, shuffle=shuffle)
+                self.train(dataloader=train_dataloader, datasets=datasets)
 
     def train(self, dataloader=None, datasets=None):
         val_datasets = datasets_dict(datasets["val"], datasets["order"])
