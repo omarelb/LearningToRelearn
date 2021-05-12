@@ -68,19 +68,19 @@ class MAML(Learner):
                 # iterate over episodes
                 while True:
                     self.set_train()
-                    support_set = self.get_support_set(train_dataloader)
+                    support_set, task = self.get_support_set(train_dataloader)
                     # TODO: return flag that indicates whether the query set is from the memory. Don't include this in the online accuracy calc
                     query_set = self.get_query_set(train_dataloader, replay_freq, replay_steps)
                     if support_set is None or query_set is None:
                         break
 
-                    self.training_step(support_set, query_set)
+                    self.training_step(support_set, query_set, task=task)
 
                     self.log()
                     self.write_metrics()
                     self.current_iter += 1
 
-    def training_step(self, support_set, query_set=None):
+    def training_step(self, support_set, query_set=None, task=None):
         self.inner_optimizer.zero_grad()
         with higher.innerloop_ctx(self.pn, self.inner_optimizer,
                                 copy_initial_weights=False,
@@ -100,6 +100,7 @@ class MAML(Learner):
                 self.metrics["online"].append({
                     "accuracy": online_metrics["accuracy"],
                     "examples_seen": self.examples_seen(),
+                    "task": task if task is not None else "none"
                 })
                 self._examples_seen += len(text)
 
@@ -118,6 +119,7 @@ class MAML(Learner):
                     self.metrics["online"].append({
                         "accuracy": online_metrics["accuracy"],
                         "examples_seen": self.examples_seen(),
+                        "task": task if task is not None else "none"
                     })
                     self._examples_seen += len(text)
 
@@ -282,12 +284,12 @@ class MAML(Learner):
         support_set = []
         for _ in range(self.config.learner.updates):
             try:
-                text, labels, _ = next(data_iterator)
+                text, labels, datasets = next(data_iterator)
                 support_set.append((text, labels))
             except StopIteration:
                 # self.logger.info("Terminating training as all the data is seen")
                 return None
-        return support_set
+        return support_set, datasets[0]
 
     def get_query_set(self, data_iterator, replay_freq, replay_steps):
         """Return a list of datapoints, and return None if the end of the data is reached."""
@@ -332,36 +334,10 @@ class MAML(Learner):
         increment_counters: bool
             If True, update online metrics and current iteration counters.
         """
-        if "few_shot" not in self.metrics["evaluation"]:
-            self.metrics["evaluation"]["few_shot"] = []
-            self.metrics["evaluation"]["few_shot_training"] = []
-        all_predictions, all_labels = [], []
-        # TODO: evaluate on all datasets instead of just one.
-
         self.logger.info(f"few shot testing on dataset {self.config.testing.eval_dataset} "
                          f"with {len(train_dataset)} samples")
-
-        # split into training and testing point, assumes there is no meaningful difference in dataset order
-        self.logger.info(f"Validating with test set of size {len(eval_dataset)}")
-        train_dataloader = DataLoader(train_dataset, batch_size=self.config.testing.few_shot_batch_size, shuffle=False)
-        eval_dataloader = DataLoader(eval_dataset, batch_size=self.mini_batch_size, shuffle=False)
-
+        train_dataloader, eval_dataloader = self.few_shot_preparation(train_dataset, eval_dataset)
         all_predictions, all_labels = [], []
-
-        zero_shot = {
-            # zero shot accuracy
-            "examples_seen": 0,
-            "accuracy": self.evaluate(dataloader=eval_dataloader)["accuracy"],
-            "task": self.config.testing.eval_dataset
-        }
-        if self.config.wandb:
-            wandb.log({
-                "few_shot_test_accuracy": zero_shot["accuracy"],
-                "examples_seen": 0
-            })
-        self.metrics["evaluation"]["few_shot"].append([zero_shot])
-        self.metrics["evaluation"]["few_shot_training"].append([])
-
         with higher.innerloop_ctx(self.pn, self.inner_optimizer,
                                 copy_initial_weights=False,
                                 track_higher_grads=False) as (fpn, diffopt):
@@ -369,7 +345,6 @@ class MAML(Learner):
             for i, (text, labels, datasets) in enumerate(train_dataloader):
                 self.set_train()
                 labels = torch.tensor(labels).to(self.device)
-                # labels = labels.to(self.device)
                 output = self.forward(text, labels, fpn)
                 loss = self.loss_fn(output["logits"], labels)
                 diffopt.step(loss)
@@ -377,34 +352,9 @@ class MAML(Learner):
                 predictions = model_utils.make_prediction(output["logits"].detach())
                 all_predictions.extend(predictions.tolist())
                 all_labels.extend(labels.tolist())
-                online_metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
                 dataset_results = self.evaluate(dataloader=eval_dataloader, prediction_network=fpn)
-                train_results = {
-                    "examples_seen": i * self.config.testing.few_shot_batch_size,
-                    "accuracy": online_metrics["accuracy"],
-                    "task": datasets[0]  # assume whole batch is from same task
-                }
-                test_results = {
-                    "examples_seen": (i + 1) * self.config.testing.few_shot_batch_size,
-                    # "few_shot_train_accuracy": online_metrics["accuracy"],
-                    # "few_shot_test_accuracy": dataset_results["accuracy"],
-                    "accuracy": dataset_results["accuracy"],
-                    "task": datasets[0]
-                }
-                if increment_counters:
-                    self._examples_seen += len(text)
-                    self.metrics["online"].append({
-                        "accuracy": online_metrics["accuracy"],
-                        "examples_seen": self.examples_seen(),
-                    })
-                self.metrics["evaluation"]["few_shot_training"][-1].append(train_results)
-                self.metrics["evaluation"]["few_shot"][-1].append(test_results)
-                if self.config.wandb:
-                    # replace with new name
-                    train_results[f"few_shot_training_accuracy_{self.few_shot_counter}"] = train_results.pop("accuracy")
-                    test_results[f"few_shot_test_accuracy_{self.few_shot_counter}"] = test_results.pop("accuracy")
-
-                    wandb.log(train_results)
-                    wandb.log(test_results)
-                    
+                self.log_few_shot(all_predictions, all_labels, datasets, dataset_results, increment_counters, text, i)
+                if (i * self.config.testing.few_shot_batch_size) % self.mini_batch_size == 0 and i > 0:
+                    all_predictions, all_labels = [], []
         self.few_shot_counter += 1
+

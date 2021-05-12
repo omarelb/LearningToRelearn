@@ -258,67 +258,71 @@ class Learner:
         increment_counters: bool
             If True, update online metrics and current iteration counters.
         """
-        if "few_shot" not in self.metrics["evaluation"]:
-            self.metrics["evaluation"]["few_shot"] = []
-            self.metrics["evaluation"]["few_shot_training"] = []
-        all_predictions, all_labels = [], []
-        # TODO: evaluate on all datasets instead of just one.
         self.logger.info(f"few shot testing on dataset {self.config.testing.eval_dataset} "
                          f"with {len(train_dataset)} samples")
-
-        self.logger.info(f"Validating with test set of size {len(eval_dataset)}")
-        train_dataloader = DataLoader(train_dataset, batch_size=self.config.testing.few_shot_batch_size, shuffle=False)
-        eval_dataloader = DataLoader(eval_dataset, batch_size=self.mini_batch_size, shuffle=False)
-
+        train_dataloader, eval_dataloader = self.few_shot_preparation(train_dataset, eval_dataset)
         all_predictions, all_labels = [], []
-
-        zero_shot = {
-            # zero shot accuracy
-            "examples_seen": 0,
-            "accuracy": self.evaluate(dataloader=eval_dataloader)["accuracy"],
-            "task": self.config.testing.eval_dataset
-        }
-        if self.config.wandb:
-            wandb.log({
-                "few_shot_accuracy": zero_shot["accuracy"],
-                "examples_seen": 0
-            })
-        self.metrics["evaluation"]["few_shot"].append([zero_shot])
-        self.metrics["evaluation"]["few_shot_training"].append([])
 
         for i, (text, labels, datasets) in enumerate(train_dataloader):
             output = self.training_step(text, labels)
             predictions = model_utils.make_prediction(output["logits"].detach())
-
             all_predictions.extend(predictions.tolist())
             all_labels.extend(labels.tolist())
-            online_metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
-            dataset_results = self.evaluate(dataloader=eval_dataloader)
 
+            dataset_results = self.evaluate(dataloader=eval_dataloader)
+            self.log_few_shot(all_predictions, all_labels, datasets, dataset_results, increment_counters, text, i)
+            if (i * self.config.testing.few_shot_batch_size) % self.mini_batch_size == 0 and i > 0:
+                all_predictions, all_labels = [], []
+        self.few_shot_counter += 1
+
+    def few_shot_preparation(self, train_dataset, eval_dataset):
+        """Few shot preparation code that isn't specific to any learner"""
+        if "few_shot" not in self.metrics["evaluation"]:
+            self.metrics["evaluation"]["few_shot"] = []
+            self.metrics["evaluation"]["few_shot_training"] = []
+        # TODO: evaluate on all datasets instead of just one.
+        train_dataloader = DataLoader(train_dataset, batch_size=self.config.testing.few_shot_batch_size, shuffle=False)
+        eval_dataloader = DataLoader(eval_dataset, batch_size=self.mini_batch_size, shuffle=False)
+
+        # split into training and testing point, assumes there is no meaningful difference in dataset order
+        self.logger.info(f"Validating with test set of size {len(eval_dataset)}")
+        self.metrics["evaluation"]["few_shot"].append([])
+        self.metrics["evaluation"]["few_shot_training"].append([])
+        
+        return train_dataloader, eval_dataloader
+
+    def log_few_shot(self, all_predictions, all_labels, datasets, dataset_results, increment_counters, text,
+                     few_shot_batch):
+        """Few shot preparation code that isn't specific to any learner"""
+        test_results = {
+            "examples_seen": few_shot_batch * self.config.testing.few_shot_batch_size,
+            "examples_seen_total": self.examples_seen(),
+            "accuracy": dataset_results["accuracy"],
+            "task": datasets[0]
+        }
+        if (few_shot_batch * self.config.testing.few_shot_batch_size) % self.mini_batch_size == 0 and few_shot_batch > 0:
+            online_metrics = model_utils.calculate_metrics(all_predictions, all_labels)
             train_results = {
-                "examples_seen": i * self.config.testing.few_shot_batch_size,
+                "examples_seen": few_shot_batch * self.config.testing.few_shot_batch_size,
+                "examples_seen_total": self.examples_seen(),
                 "accuracy": online_metrics["accuracy"],
                 "task": datasets[0]  # assume whole batch is from same task
             }
-            test_results = {
-                "examples_seen": (i + 1) * self.config.testing.few_shot_batch_size,
-                "accuracy": dataset_results["accuracy"],
-                "task": datasets[0]
-            }
+            self.metrics["evaluation"]["few_shot_training"][-1].append(train_results)
             if increment_counters:
-                self._examples_seen += len(text)
                 self.metrics["online"].append({
                     "accuracy": online_metrics["accuracy"],
                     "examples_seen": self.examples_seen(),
+                    "task": datasets[0]
                 })
-            self.metrics["evaluation"]["few_shot_training"][-1].append(train_results)
-            self.metrics["evaluation"]["few_shot"][-1].append(test_results)
-            if self.config.wandb:
-                train_results[f"few_shot_training_accuracy_{self.few_shot_counter}"] = train_results.pop("accuracy")
-                test_results[f"few_shot_test_accuracy_{self.few_shot_counter}"] = test_results.pop("accuracy")
-                wandb.log(train_results)
-                wandb.log(test_results)
-        self.few_shot_counter += 1
+        if increment_counters:
+            self._examples_seen += len(text)
+        self.metrics["evaluation"]["few_shot"][-1].append(test_results)
+        if self.config.wandb:
+            # replace with new name
+            test_results = test_results.copy()
+            test_results[f"few_shot_test_accuracy_{self.few_shot_counter}"] = test_results.pop("accuracy")
+            wandb.log(test_results)
 
     def reset_tracker(self):
         """Initialize dictionary that stores information about loss, predictions, and labels

@@ -61,8 +61,6 @@ class Baseline(Learner):
         val_datasets = datasets_dict(datasets["val"], datasets["order"])
 
         for epoch in range(self.n_epochs):
-            all_losses, all_predictions, all_labels = [], [], []
-
             for text, labels, datasets in dataloader:
                 output = self.training_step(text, labels)
                 task = datasets[0]
@@ -81,6 +79,7 @@ class Baseline(Learner):
                     self.write_metrics()
                 if self.current_iter % self.validate_freq == 0:
                     self.validate(val_datasets, n_samples=self.config.training.n_validation_samples)
+                self._examples_seen += len(text)
                 self.current_iter += 1
 
     def training_step(self, text, labels):
@@ -115,9 +114,6 @@ class Baseline(Learner):
                 "examples_seen": self.examples_seen()
             })
         self.reset_tracker()
-
-    def examples_seen(self):
-        return (self.current_iter + 1) * self.mini_batch_size
 
     def evaluate(self, dataloader):
         self.set_eval()
