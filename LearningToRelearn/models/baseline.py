@@ -55,12 +55,14 @@ class Baseline(Learner):
                 self.few_shot_testing(train_dataset=data, eval_dataset=eval_dataset, increment_counters=True)
             else:
                 train_dataloader = DataLoader(data, batch_size=self.mini_batch_size, shuffle=shuffle)
-                self.train(dataloader=train_dataloader, datasets=datasets)
+                self.train(dataloader=train_dataloader, datasets=datasets, dataset_name=dataset_name)
+            if dataset_name == self.config.testing.eval_dataset:
+                self.eval_task_first_encounter = False
 
-    def train(self, dataloader=None, datasets=None):
+    def train(self, dataloader=None, datasets=None, dataset_name=None):
         val_datasets = datasets_dict(datasets["val"], datasets["order"])
 
-        for epoch in range(self.n_epochs):
+        for _ in range(self.n_epochs):
             for text, labels, datasets in dataloader:
                 output = self.training_step(text, labels)
                 task = datasets[0]
@@ -69,11 +71,15 @@ class Baseline(Learner):
                 self.update_tracker(output, predictions, labels)
 
                 metrics = model_utils.calculate_metrics(self.tracker["predictions"], self.tracker["labels"])
-                self.metrics["online"].append({
+                online_metrics = {
                     "accuracy": metrics["accuracy"],
                     "examples_seen": self.examples_seen(),
                     "task": task
-                })
+                }
+                self.metrics["online"].append(online_metrics)
+                if dataset_name is not None and dataset_name == self.config.testing.eval_dataset and \
+                    self.eval_task_first_encounter:
+                    self.metrics["eval_task_first_encounter"].append(online_metrics)
                 if self.current_iter % self.log_freq == 0:
                     self.log()
                     self.write_metrics()

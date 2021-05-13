@@ -141,6 +141,9 @@ class Learner:
         # this is used to track metrics of different tasks during training
         self.metrics = collections.defaultdict(dict)
         self.metrics["online"] = []
+        # used to know when to log to first encounter metrics
+        self.eval_task_first_encounter = True
+        self.metrics["eval_task_first_encounter"] = []
         # keeps track of how many times we have performed few shot testing, for logging purposes
         self.few_shot_counter = 0
         self.reset_tracker()
