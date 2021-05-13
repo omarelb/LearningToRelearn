@@ -165,7 +165,7 @@ def analyze_results(metrics_path=None, metrics=None, write_path=None, use_wandb=
         # crop the image
         subprocess.call(f"pdfcrop {img} {img}", shell=True)
 
-    if "few_shot_learning_curve_area" in results:
+    if "few_shot_learning_curve_area_0" in results:
         # Few shot learning curve area
         for i, _ in enumerate(metrics["evaluation"]["few_shot"]):
             plt.figure(figsize=figsize)
@@ -189,7 +189,7 @@ def analyze_results(metrics_path=None, metrics=None, write_path=None, use_wandb=
             plt.savefig(img)
             subprocess.call(f"pdfcrop {img} {img}", shell=True)
 
-    if "few_shot_learning_speed" in results:
+    if "few_shot_learning_speed_0" in results:
         # Few shot learning speed
         plt.figure(figsize=figsize)
         x = list(results[f"few_shot_learning_speed_{i}"].keys())
