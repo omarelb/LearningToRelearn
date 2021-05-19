@@ -27,7 +27,6 @@ from LearningToRelearn.models.anml import ANML
 from LearningToRelearn.models.baseline import Baseline
 from LearningToRelearn.models.maml import MAML
 from LearningToRelearn.models.oml import OML
-from LearningToRelearn.models.replay import Replay
 from LearningToRelearn.models.relearning import Relearner
 from LearningToRelearn.models.basic_memory import BasicMemory
 from LearningToRelearn.models.encoder_memory import EncoderMemory
