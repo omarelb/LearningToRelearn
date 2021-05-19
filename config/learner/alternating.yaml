@@ -1,8 +1,9 @@
 # @package _group_
-type: alternating # sequential learning
+type: baseline # sequential learning
 lr: 0.00003 # learning rate
 
 data:
+  alternating_order: true
   alternating_tasks: # Which tasks to alternate between. If none, uses all tasks
   alternating_n_samples_per_switch: 80 # How many samples to use at each switch.
   alternating_relative_frequencies: # How much each task is seen compared to others.

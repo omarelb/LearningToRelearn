@@ -1,6 +1,8 @@
 learner:
-  type: multitask # multitask learning
+  type: baseline # multitask learning
   lr: 0.00003 # learning rate
+  multitask: true  # whether the data is shown in a multitask fashion
+  replay_rate: 0 # replay rate from memory
 
 training:
   epochs: 2
