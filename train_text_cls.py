@@ -42,12 +42,10 @@ def get_learner(config, **kwargs):
     """
     Return instantiation of a model depending on its type specified in a config.
     """
-    if config.learner.type in ("sequential", "multitask", "single", "alternating"):
+    if config.learner.type == "baseline":
         return Baseline(config, **kwargs)
     if config.learner.type == "agem":
         learner = AGEM(config, **kwargs)
-    elif config.learner.type == "replay":
-        learner = Replay(config, **kwargs)
     elif config.learner.type == "maml":
         learner = MAML(config, **kwargs)
     elif config.learner.type == "oml":
