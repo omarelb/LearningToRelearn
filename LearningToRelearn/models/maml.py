@@ -45,6 +45,8 @@ class MAML(Learner):
         inner_params = [p for p in self.pn.parameters() if p.requires_grad]
         self.inner_optimizer = optim.SGD(inner_params, lr=self.inner_lr)
 
+        self.metrics["replay_samples_seen"] = 0
+
     def training(self, datasets, **kwargs):
         train_datasets = datasets_dict(datasets["train"], datasets["order"])
         val_datasets = datasets_dict(datasets["val"], datasets["order"])
@@ -65,12 +67,13 @@ class MAML(Learner):
                 self.few_shot_testing(train_dataset=data, eval_dataset=eval_dataset, increment_counters=True)
             else:
                 train_dataloader = iter(DataLoader(data, batch_size=self.mini_batch_size, shuffle=False))
+                self.episode_samples_seen = 0 # have to keep track of per-task samples seen as we might use replay as well
                 # iterate over episodes
                 while True:
                     self.set_train()
-                    support_set, task = self.get_support_set(train_dataloader)
+                    support_set, task = self.get_support_set(train_dataloader, n_sample)
                     # TODO: return flag that indicates whether the query set is from the memory. Don't include this in the online accuracy calc
-                    query_set = self.get_query_set(train_dataloader, replay_freq, replay_steps)
+                    query_set = self.get_query_set(train_dataloader, replay_freq, replay_steps, n_sample)
                     if support_set is None or query_set is None:
                         break
 
@@ -79,6 +82,10 @@ class MAML(Learner):
                     self.log()
                     self.write_metrics()
                     self.current_iter += 1
+                    if self.episode_samples_seen >= n_sample:
+                        break
+            if dataset_name == self.config.testing.eval_dataset:
+                self.eval_task_first_encounter = False
 
     def training_step(self, support_set, query_set=None, task=None):
         self.inner_optimizer.zero_grad()
@@ -96,12 +103,16 @@ class MAML(Learner):
 
                 predictions = model_utils.make_prediction(output["logits"].detach())
                 self.update_support_tracker(loss, predictions, labels)
-                online_metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
-                self.metrics["online"].append({
-                    "accuracy": online_metrics["accuracy"],
+                metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
+                online_metrics = {
+                    "accuracy": metrics["accuracy"],
                     "examples_seen": self.examples_seen(),
                     "task": task if task is not None else "none"
-                })
+                }
+                self.metrics["online"].append(online_metrics)
+                if task is not None and task == self.config.testing.eval_dataset and \
+                    self.eval_task_first_encounter:
+                    self.metrics["eval_task_first_encounter"].append(online_metrics)
                 self._examples_seen += len(text)
 
             # Outer loop
@@ -115,12 +126,16 @@ class MAML(Learner):
 
                     predictions = model_utils.make_prediction(output["logits"].detach())
                     self.update_query_tracker(loss, predictions, labels)
-                    online_metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
-                    self.metrics["online"].append({
-                        "accuracy": online_metrics["accuracy"],
+                    metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
+                    online_metrics = {
+                        "accuracy": metrics["accuracy"],
                         "examples_seen": self.examples_seen(),
                         "task": task if task is not None else "none"
-                    })
+                    }
+                    self.metrics["online"].append(online_metrics)
+                    if task is not None and task == self.config.testing.eval_dataset and \
+                        self.eval_task_first_encounter:
+                        self.metrics["eval_task_first_encounter"].append(online_metrics)
                     self._examples_seen += len(text)
 
                 # Meta optimizer step
@@ -279,19 +294,22 @@ class MAML(Learner):
     def load_other_state_information(self, checkpoint):
         self.memory = checkpoint["memory"]
 
-    def get_support_set(self, data_iterator):
+    def get_support_set(self, data_iterator, max_sample):
         """Return a list of datapoints, and return None if the end of the data is reached."""
         support_set = []
         for _ in range(self.config.learner.updates):
             try:
                 text, labels, datasets = next(data_iterator)
                 support_set.append((text, labels))
+                self.episode_samples_seen += len(text)
             except StopIteration:
                 # self.logger.info("Terminating training as all the data is seen")
-                return None
+                return None, None
+            if self.episode_samples_seen >= max_sample:
+                break
         return support_set, datasets[0]
 
-    def get_query_set(self, data_iterator, replay_freq, replay_steps):
+    def get_query_set(self, data_iterator, replay_freq, replay_steps, max_sample):
         """Return a list of datapoints, and return None if the end of the data is reached."""
         query_set = []
         if self.replay_rate != 0 and (self.current_iter + 1) % replay_freq == 0:
@@ -300,13 +318,17 @@ class MAML(Learner):
             for _ in range(replay_steps):
                 text, labels = self.memory.read_batch(batch_size=self.mini_batch_size)
                 query_set.append((text, labels))
+                self.episode_samples_seen += len(text)
+                self.metrics["replay_samples_seen"] += len(text)
+                if self.episode_samples_seen >= max_sample:
+                    break
         else:
             # otherwise simply use next batch from data stream as query set
             try:
                 text, labels, _ = next(data_iterator)
                 query_set.append((text, labels))
                 self.memory.write_batch(text, labels)
-                self._examples_seen += self.mini_batch_size
+                self.episode_samples_seen += len(text)
             except StopIteration:
                 # self.logger.info("Terminating training as all the data is seen")
                 return None
