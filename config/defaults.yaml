@@ -19,6 +19,7 @@ learner:
   clip_grad_norm: 25 # gradient norm clipping (for replay learner)
 
 data:
+  alternating_order: false # whether to use an alternating order in the data
   alternating_tasks: # Which tasks to alternate between. If none, uses all tasks
   alternating_n_samples_per_switch: 80 # How many samples to use at each switch.
   alternating_relative_frequencies: # How much each task is seen compared to others.
@@ -51,7 +52,7 @@ name: # experiment name, not specified by default, making it None
 
 hydra:
   run:
-    dir: experiments/${hydra.job.override_dirname}_${now:%Y-%m-%d_%H-%M-%S}_${name}/seed=${seed}
+    dir: experiments/${name}/seed=${seed}
   sweep:
     dir: experiments/sweep-${name}_${now:%Y-%m-%d_%H-%M-%S}
     subdir: ${hydra.job.override_dirname}_${hydra.job.num}
