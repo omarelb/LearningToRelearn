@@ -9,7 +9,7 @@ import wandb
 
 import LearningToRelearn.datasets.utils as dataset_utils
 import LearningToRelearn.models.utils as model_utils
-from LearningToRelearn.models.base_models import TransformerClsModel
+from LearningToRelearn.models.base_models import ReplayMemory, TransformerClsModel
 from LearningToRelearn.learner import Learner
 from LearningToRelearn.datasets.text_classification_dataset import get_continuum, alternating_order, datasets_dict, n_samples_order
 
@@ -31,6 +31,7 @@ class Baseline(Learner):
         self.logger.info("Loaded {} as model".format(self.model.__class__.__name__))
         self.loss_fn = nn.CrossEntropyLoss()
         self.optimizer = AdamW([p for p in self.model.parameters() if p.requires_grad], lr=self.lr)
+        self.memory = ReplayMemory(write_prob=self.write_prob, tuple_size=2)
 
     def training(self, datasets, **kwargs):
         # train_datasets = {dataset_name: dataset for dataset_name, dataset in zip(datasets["order"], datasets["train"])}
@@ -39,13 +40,12 @@ class Baseline(Learner):
         eval_dataset = val_datasets[self.config.testing.eval_dataset]
         eval_dataset = eval_dataset.sample(min(self.config.testing.few_shot_validation_size, len(eval_dataset)))
 
-        if self.type == "alternating":
+        if self.config.data.alternating_order:
             order, n_samples = alternating_order(train_datasets, tasks=self.config.data.alternating_tasks,
                                                  n_samples_per_switch=self.config.data.alternating_n_samples_per_switch,
                                                  relative_frequencies=self.config.data.alternating_relative_frequencies)
         else:
             n_samples, order = n_samples_order(self.config.learner.samples_per_task, self.config.task_order, datasets["order"])
-        shuffle = self.type == "multitask"
         datas = get_continuum(train_datasets, order=order, n_samples=n_samples,
                              eval_dataset=self.config.testing.eval_dataset, merge=False)
         for data, dataset_name, n_sample in zip(datas, order, n_samples):
@@ -54,13 +54,14 @@ class Baseline(Learner):
             if dataset_name == "evaluation":
                 self.few_shot_testing(train_dataset=data, eval_dataset=eval_dataset, increment_counters=True)
             else:
-                train_dataloader = DataLoader(data, batch_size=self.mini_batch_size, shuffle=shuffle)
+                train_dataloader = DataLoader(data, batch_size=self.mini_batch_size, shuffle=self.config.learner.multitask)
                 self.train(dataloader=train_dataloader, datasets=datasets, dataset_name=dataset_name)
             if dataset_name == self.config.testing.eval_dataset:
                 self.eval_task_first_encounter = False
 
     def train(self, dataloader=None, datasets=None, dataset_name=None):
         val_datasets = datasets_dict(datasets["val"], datasets["order"])
+        replay_freq, replay_steps = self.replay_parameters()
 
         for _ in range(self.n_epochs):
             for text, labels, datasets in dataloader:
@@ -69,6 +70,11 @@ class Baseline(Learner):
 
                 predictions = model_utils.make_prediction(output["logits"].detach())
                 self.update_tracker(output, predictions, labels)
+
+                if self.replay_rate != 0 and (self.current_iter + 1) % replay_freq == 0:
+                    self.replay_training_step(replay_steps)
+
+                self.memory.write_batch(text, labels)
 
                 metrics = model_utils.calculate_metrics(self.tracker["predictions"], self.tracker["labels"])
                 online_metrics = {
@@ -102,6 +108,20 @@ class Baseline(Learner):
         loss = loss.item()
 
         return {"logits": logits, "loss": loss}
+
+    def replay_training_step(self, replay_steps):
+        self.optimizer.zero_grad()
+        for _ in range(replay_steps):
+            text, labels = self.memory.read_batch(batch_size=self.mini_batch_size)
+            labels = torch.tensor(labels).to(self.device)
+            input_dict = self.model.encode_text(text)
+            output = self.model(input_dict)
+            loss = self.loss_fn(output, labels)
+            loss.backward()
+
+        params = [p for p in self.model.parameters() if p.requires_grad]
+        torch.nn.utils.clip_grad_norm(params, self.config.learner.clip_grad_norm)
+        self.optimizer.step()
 
     def log(self):
         metrics = model_utils.calculate_metrics(self.tracker["predictions"], self.tracker["labels"])
