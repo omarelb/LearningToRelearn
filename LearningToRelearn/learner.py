@@ -136,6 +136,11 @@ class Learner:
         self.validate_freq = config.training.validate_freq
         self.type = config.learner.type
 
+        # replay attributes
+        self.write_prob = config.learner.write_prob
+        self.replay_rate = config.learner.replay_rate
+        self.replay_every = config.learner.replay_every
+
         self.start_time = time.time()
         self.last_checkpoint_time = self.start_time
         # if checkpoint_exists:
@@ -149,6 +154,7 @@ class Learner:
         # used to know when to log to first encounter metrics
         self.eval_task_first_encounter = True
         self.metrics["eval_task_first_encounter"] = []
+        self.metrics["replay_samples_seen"] = 0
         # keeps track of how many times we have performed few shot testing, for logging purposes
         self.few_shot_counter = 0
         self.reset_tracker()
@@ -356,7 +362,7 @@ class Learner:
         if self.replay_rate != 0:
             replay_batch_freq = self.replay_every // self.mini_batch_size
             replay_freq = int(math.ceil((replay_batch_freq + 1) / (self.config.learner.updates + 1)))
-            replay_steps = int(self.replay_every * self.replay_rate / self.mini_batch_size)
+            replay_steps = max(int(self.replay_every * self.replay_rate / self.mini_batch_size), 1)
         else:
             replay_freq = 0
             replay_steps = 0

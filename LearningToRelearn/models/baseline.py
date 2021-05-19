@@ -122,6 +122,7 @@ class Baseline(Learner):
             loss = self.loss_fn(output, labels)
             loss.backward()
             self._examples_seen += len(text)
+            self.metrics["replay_samples_seen"] += len(text)
             episode_samples_seen += len(text)
             if episode_samples_seen >= max_samples:
                 break

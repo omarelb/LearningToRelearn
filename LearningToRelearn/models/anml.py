@@ -26,8 +26,6 @@ class ANML(Learner):
         self.inner_lr = config.learner.inner_lr
         self.meta_lr = config.learner.meta_lr
         self.write_prob = config.learner.write_prob
-        self.replay_rate = config.learner.replay_rate
-        self.replay_every = config.learner.replay_every
         self.mini_batch_size = config.training.batch_size
 
         self.nm = TransformerNeuromodulator(model_name=config.learner.model_name,

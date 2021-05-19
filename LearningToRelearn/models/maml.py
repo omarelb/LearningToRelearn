@@ -25,9 +25,6 @@ class MAML(Learner):
 
         self.inner_lr = config.learner.inner_lr
         self.meta_lr = config.learner.meta_lr
-        self.write_prob = config.learner.write_prob
-        self.replay_rate = config.learner.replay_rate
-        self.replay_every = config.learner.replay_every
         self.mini_batch_size = config.training.batch_size
 
         self.pn = TransformerClsModel(model_name=config.learner.model_name,
@@ -44,8 +41,6 @@ class MAML(Learner):
 
         inner_params = [p for p in self.pn.parameters() if p.requires_grad]
         self.inner_optimizer = optim.SGD(inner_params, lr=self.inner_lr)
-
-        self.metrics["replay_samples_seen"] = 0
 
     def training(self, datasets, **kwargs):
         train_datasets = datasets_dict(datasets["train"], datasets["order"])
