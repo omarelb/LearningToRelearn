@@ -41,7 +41,7 @@ def learning_curve_area(performances, zero_shot_difference=False):
     area = 0
     for i, performance in enumerate(performances):
         area += performance["accuracy"]
-        result[i * batch_size] = (area - performances[0]["accuracy"] * zero_shot_difference) / (i + 1)
+        result[i * batch_size] = area / (i + 1) - performances[0]["accuracy"] * zero_shot_difference
     return result
 
 def learning_slope(performances):
@@ -152,7 +152,9 @@ def collect_results(metrics):
         results["individual_accuracy"] = metrics["evaluation"]["individual"]
     # task that was evaluated
     if "few_shot" in metrics["evaluation"]:
-        results["eval_task"] = metrics["evaluation"]["few_shot"][0][0]["task"]
+        # results["eval_task"] = metrics["evaluation"]["few_shot"][0][0]["task"]
+        results["first_encounter_initial_accuracy"] = metrics["eval_task_first_encounter"][0]["accuracy"]
+        results["first_encounter_best_accuracy"] = max(entry["accuracy"] for entry in metrics["eval_task_first_encounter"])
         results[f"first_encounter_learning_curve_area"] = learning_curve_area(metrics["eval_task_first_encounter"])
         results[f"first_encounter_learning_curve_area_difference"] = learning_curve_area(metrics["eval_task_first_encounter"],
                                                                                          zero_shot_difference=True)
@@ -172,13 +174,12 @@ def collect_results(metrics):
                                                                             results[f"few_shot_learning_curve_area_difference_{i}"])
             results[f"few_shot_relearning_speed_{i}"] = get_relearning(results[f"first_encounter_learning_speed_expanded"],
                                                                        results[f"few_shot_learning_speed_{i}"])
-
             results[f"forgetting_{i}"], results[f"forgetting_normalized_{i}"] = get_forgetting(few_shot_metrics, metrics)
     # validation accuracy after training on k samples, for multiple k
     # results["few_shot_accuracy"] = metrics["evaluation"]["few_shot"]
     return results
 
-def analyze_results(metrics_path=None, metrics=None, write_path=None, use_wandb=False):
+def analyze_results(metrics_path=None, metrics=None, write_path=None, use_wandb=False, make_plots=True):
     """
     Collect results contained in a metrics dictionary.
 
@@ -211,7 +212,10 @@ def analyze_results(metrics_path=None, metrics=None, write_path=None, use_wandb=
         json.dump(results, f)
     results_flattened = flatten_dict(results)
     # also write to csv
-    pd.DataFrame({k: [v] for k, v in results_flattened.items()}).to_csv(write_path / "results.csv", index=False)
+    pd.DataFrame.from_dict(results_flattened, orient="index", columns=["value"]).to_csv(write_path / "results.csv")
+
+    if not make_plots:
+        return
 
     # generate plots
     img_path = write_path / "img"
@@ -348,4 +352,4 @@ def analyze_results(metrics_path=None, metrics=None, write_path=None, use_wandb=
     return results_flattened
 
 if __name__ == "__main__":
-    analyze_results(metrics_path=Path('experiments') / sys.argv[1])
+    analyze_results(metrics_path=Path('experiments') / sys.argv[1], make_plots=False)
