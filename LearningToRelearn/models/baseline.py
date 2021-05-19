@@ -55,14 +55,15 @@ class Baseline(Learner):
                 self.few_shot_testing(train_dataset=data, eval_dataset=eval_dataset, increment_counters=True)
             else:
                 train_dataloader = DataLoader(data, batch_size=self.mini_batch_size, shuffle=self.config.learner.multitask)
-                self.train(dataloader=train_dataloader, datasets=datasets, dataset_name=dataset_name)
+                self.train(dataloader=train_dataloader, datasets=datasets, dataset_name=dataset_name, max_samples=n_sample)
             if dataset_name == self.config.testing.eval_dataset:
                 self.eval_task_first_encounter = False
 
-    def train(self, dataloader=None, datasets=None, dataset_name=None):
+    def train(self, dataloader=None, datasets=None, dataset_name=None, max_samples=10000):
         val_datasets = datasets_dict(datasets["val"], datasets["order"])
         replay_freq, replay_steps = self.replay_parameters()
 
+        episode_samples_seen = 0 # have to keep track of per-task samples seen as we might use replay as well
         for _ in range(self.n_epochs):
             for text, labels, datasets in dataloader:
                 output = self.training_step(text, labels)
@@ -70,11 +71,6 @@ class Baseline(Learner):
 
                 predictions = model_utils.make_prediction(output["logits"].detach())
                 self.update_tracker(output, predictions, labels)
-
-                if self.replay_rate != 0 and (self.current_iter + 1) % replay_freq == 0:
-                    self.replay_training_step(replay_steps)
-
-                self.memory.write_batch(text, labels)
 
                 metrics = model_utils.calculate_metrics(self.tracker["predictions"], self.tracker["labels"])
                 online_metrics = {
@@ -91,8 +87,15 @@ class Baseline(Learner):
                     self.write_metrics()
                 if self.current_iter % self.validate_freq == 0:
                     self.validate(val_datasets, n_samples=self.config.training.n_validation_samples)
+
+                if self.replay_rate != 0 and (self.current_iter + 1) % replay_freq == 0:
+                    self.replay_training_step(replay_steps, episode_samples_seen, max_samples)
+                self.memory.write_batch(text, labels)
                 self._examples_seen += len(text)
+                episode_samples_seen += len(text)
                 self.current_iter += 1
+                if episode_samples_seen >= max_samples:
+                    break
 
     def training_step(self, text, labels):
         self.set_train()
@@ -109,7 +112,7 @@ class Baseline(Learner):
 
         return {"logits": logits, "loss": loss}
 
-    def replay_training_step(self, replay_steps):
+    def replay_training_step(self, replay_steps, episode_samples_seen, max_samples):
         self.optimizer.zero_grad()
         for _ in range(replay_steps):
             text, labels = self.memory.read_batch(batch_size=self.mini_batch_size)
@@ -118,6 +121,10 @@ class Baseline(Learner):
             output = self.model(input_dict)
             loss = self.loss_fn(output, labels)
             loss.backward()
+            self._examples_seen += len(text)
+            episode_samples_seen += len(text)
+            if episode_samples_seen >= max_samples:
+                break
 
         params = [p for p in self.model.parameters() if p.requires_grad]
         torch.nn.utils.clip_grad_norm(params, self.config.learner.clip_grad_norm)
