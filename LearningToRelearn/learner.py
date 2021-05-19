@@ -16,6 +16,7 @@ import pandas as pd
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from torch.utils.data.dataset import ConcatDataset
 from torch.utils.tensorboard import SummaryWriter
 from sklearn import metrics
 import matplotlib.pyplot as plt
@@ -97,6 +98,10 @@ class Learner:
 
         # Test and evaluation results saved here
         self.results_dir = self.exp_dir / RESULTS_DIR
+        if self.results_dir.is_dir() and not "evaluate" in self.config and not self.config.name == "test":
+            raise Exception(f"This experiment directory, {self.exp_dir}, already exists. Use a different experiment name "
+                            "or different seed. If evaluating, specify the evaluate flag when running the program."
+            )
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
         if config.debug_logging:
@@ -197,12 +202,13 @@ class Learner:
         order: List[str]
             Specifies order of encountered datasets
         """
-        datasets = datasets[split]
-        eval_datasets = datasets_dict(datasets, order)
+        train_datasets = datasets_dict(datasets["train"], order)
+        eval_datasets = datasets[split]
+        eval_datasets = datasets_dict(eval_datasets, order)
         self.set_eval()
 
         if self.config.testing.average_accuracy:
-            self.average_accuracy(eval_datasets)
+            self.average_accuracy(eval_datasets, train_datasets=train_datasets)
         if self.config.testing.few_shot:
             # split into training and testing point, assumes there is no meaningful difference in dataset order
             dataset = eval_datasets[self.config.testing.eval_dataset]
@@ -212,9 +218,13 @@ class Learner:
             eval_dataset = eval_dataset.sample(min(self.config.testing.few_shot_validation_size, len(eval_dataset)))
             self.few_shot_testing(train_dataset=train_dataset, eval_dataset=eval_dataset)
 
-    def average_accuracy(self, datasets):
+    def average_accuracy(self, datasets, train_datasets=None):
         results = {}
         accuracies, precisions, recalls, f1s = [], [], [], []
+
+        # if train_datasets is not None and self.config.testing.n_samples_before_average_evaluate > 0:
+        #     train_dataloader = DataLoader(ConcatDataset(train_datasets.values()), shuffle=True)
+        #     # TODO: finish this
         for dataset_name, dataset in datasets.items():
             self.logger.info("Testing on {}".format(dataset_name))
             if self.config.testing.average_validation_size is not None:
