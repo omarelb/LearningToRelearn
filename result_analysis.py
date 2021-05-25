@@ -145,38 +145,42 @@ def collect_results(metrics):
     if "accuracy" in online_df.columns:
         results["online_accuracy"] = online_df.accuracy.mean()
     # mean accuracy over all evaluation datasets
-    if "average" in metrics["evaluation"]:
-        results["average_accuracy"] = metrics["evaluation"]["average"]["accuracy"]
-    # accuracy over individual evaluation datasets
-    if "individual" in metrics["evaluation"]:
-        results["individual_accuracy"] = metrics["evaluation"]["individual"]
-    # task that was evaluated
-    if "few_shot" in metrics["evaluation"]:
-        # results["eval_task"] = metrics["evaluation"]["few_shot"][0][0]["task"]
+    if "eval_task_first_encounter" in metrics:
         results["first_encounter_initial_accuracy"] = metrics["eval_task_first_encounter"][0]["accuracy"]
         results["first_encounter_best_accuracy"] = max(entry["accuracy"] for entry in metrics["eval_task_first_encounter"])
         results[f"first_encounter_learning_curve_area"] = learning_curve_area(metrics["eval_task_first_encounter"])
         results[f"first_encounter_learning_curve_area_difference"] = learning_curve_area(metrics["eval_task_first_encounter"],
-                                                                                         zero_shot_difference=True)
+                                                                                        zero_shot_difference=True)
         results[f"first_encounter_learning_speed"] = learning_slope(metrics["eval_task_first_encounter"])
         results[f"first_encounter_learning_curve_area_expanded"] = expand_dict(results[f"first_encounter_learning_curve_area"])
         results[f"first_encounter_learning_curve_area_difference_expanded"] = expand_dict(results[f"first_encounter_learning_curve_area_difference"])
         results[f"first_encounter_learning_speed_expanded"] = expand_dict(learning_slope(metrics["eval_task_first_encounter"]))
-        for i, few_shot_metrics in enumerate(metrics["evaluation"]["few_shot"]):
-            results[f"few_shot_learning_curve_area_{i}"] = learning_curve_area(few_shot_metrics)
-            results[f"few_shot_learning_curve_area_difference_{i}"] = learning_curve_area(few_shot_metrics,
-                                                                                    zero_shot_difference=True)
-            results[f"few_shot_learning_speed_{i}"] = learning_slope(few_shot_metrics)
+    for split in ("", "val", "test"):
+        split += "_" * (len(split) > 0)
+        evaluation = split + "evaluation"
+        if evaluation in metrics:
+            if "average" in metrics[evaluation]:
+                results[split + "average_accuracy"] = metrics[evaluation]["average"]["accuracy"]
+            # accuracy over individual evaluation datasets
+            if "individual" in metrics[evaluation]:
+                results[split + "individual_accuracy"] = metrics[evaluation]["individual"]
+            if "few_shot" in metrics[evaluation]:
+                # results["eval_task"] = metrics["evaluation"]["few_shot"][0][0]["task"]
+                for i, few_shot_metrics in enumerate(metrics[evaluation]["few_shot"]):
+                    results[split + f"few_shot_learning_curve_area_{i}"] = learning_curve_area(few_shot_metrics)
+                    results[split + f"few_shot_learning_curve_area_difference_{i}"] = learning_curve_area(few_shot_metrics,
+                                                                                            zero_shot_difference=True)
+                    results[split + f"few_shot_learning_speed_{i}"] = learning_slope(few_shot_metrics)
 
-            results[f"few_shot_relearning_curve_area_{i}"] = get_relearning(results[f"first_encounter_learning_curve_area_expanded"],
-                                                                            results[f"few_shot_learning_curve_area_{i}"])
-            results[f"few_shot_relearning_curve_area_difference_{i}"] = get_relearning(results[f"first_encounter_learning_curve_area_difference_expanded"],
-                                                                            results[f"few_shot_learning_curve_area_difference_{i}"])
-            results[f"few_shot_relearning_speed_{i}"] = get_relearning(results[f"first_encounter_learning_speed_expanded"],
-                                                                       results[f"few_shot_learning_speed_{i}"])
-            results[f"forgetting_{i}"], results[f"forgetting_normalized_{i}"] = get_forgetting(few_shot_metrics, metrics)
-    # validation accuracy after training on k samples, for multiple k
-    # results["few_shot_accuracy"] = metrics["evaluation"]["few_shot"]
+                    results[split + f"few_shot_relearning_curve_area_{i}"] = get_relearning(results[f"first_encounter_learning_curve_area_expanded"],
+                                                                                    results[split + f"few_shot_learning_curve_area_{i}"])
+                    results[split + f"few_shot_relearning_curve_area_difference_{i}"] = get_relearning(results[f"first_encounter_learning_curve_area_difference_expanded"],
+                                                                                    results[split + f"few_shot_learning_curve_area_difference_{i}"])
+                    results[split + f"few_shot_relearning_speed_{i}"] = get_relearning(results[f"first_encounter_learning_speed_expanded"],
+                                                                            results[split + f"few_shot_learning_speed_{i}"])
+                    results[split + f"forgetting_{i}"], results[split + f"forgetting_normalized_{i}"] = get_forgetting(few_shot_metrics, metrics)
+            # validation accuracy after training on k samples, for multiple k
+            # results["few_shot_accuracy"] = metrics["evaluation"]["few_shot"]
     return results
 
 def analyze_results(metrics_path=None, metrics=None, write_path=None, use_wandb=False, make_plots=True):
@@ -223,131 +227,136 @@ def analyze_results(metrics_path=None, metrics=None, write_path=None, use_wandb=
     online_df = pd.DataFrame(metrics["online"])
 
     figsize = (20, 10)
-    if "few_shot" in metrics["evaluation"]:
-        # few shot accuracy
-        plt.figure(figsize=figsize)
-        for i, few_shot_metrics in enumerate(metrics["evaluation"]["few_shot"]):
-            x = [result["examples_seen"] for result in few_shot_metrics]
-            y = [result["accuracy"] for result in few_shot_metrics]
+    for split in ("", "val", "test"):
+        split += "_" * (len(split) > 0)
+        evaluation = split + "evaluation"
+        if evaluation in metrics:
+            if "few_shot" in metrics[evaluation]:
+                # few shot accuracy
+                plt.figure(figsize=figsize)
+                for i, few_shot_metrics in enumerate(metrics[evaluation]["few_shot"]):
+                    x = [result["examples_seen"] for result in few_shot_metrics]
+                    y = [result["accuracy"] for result in few_shot_metrics]
+                    plt.plot(x, y)
+                    if use_wandb:
+                        wandb.log({split + f"chart_few_shot_accuracy_{i}": plt})
+                    img = img_path / (split + f"few_shot_accuracy_{i}.pdf")
+                    plt.savefig(img)
+                    subprocess.call(f"pdfcrop {img} {img}", shell=True)
+
+                # Few shot learning curve area
+                for i, _ in enumerate(metrics[evaluation]["few_shot"]):
+                    plt.figure(figsize=figsize)
+                    x = list(results[split + f"few_shot_learning_curve_area_{i}"].keys())
+                    y = list(results[split + f"few_shot_learning_curve_area_{i}"].values())
+                    plt.plot(x, y)
+                    if use_wandb:
+                        wandb.log({split + f"chart_few_shot_lca_{i}": plt})
+                    img = img_path / (split + f"few_shot_learning_curve_area_{i}.pdf")
+                    plt.savefig(img)
+                    subprocess.call(f"pdfcrop {img} {img}", shell=True)
+
+                    # Few shot learning curve area
+                    plt.figure(figsize=figsize)
+                    x = list(results[split + f"few_shot_learning_curve_area_difference_{i}"].keys())
+                    y = list(results[split + f"few_shot_learning_curve_area_difference_{i}"].values())
+                    plt.plot(x, y)
+                    if use_wandb:
+                        wandb.log({split + f"chart_few_shot_lca_zero_shot_difference_{i}": plt})
+                    img = img_path / (split + f"few_shot_learning_curve_area_difference_{i}.pdf")
+                    plt.savefig(img)
+                    subprocess.call(f"pdfcrop {img} {img}", shell=True)
+
+                    # ---------------------------------------
+                    # Few shot learning curve area
+                    plt.figure(figsize=figsize)
+                    x = list(results[split + f"few_shot_relearning_curve_area_{i}"].keys())
+                    y = list(results[split + f"few_shot_relearning_curve_area_{i}"].values())
+                    plt.plot(x, y)
+                    if use_wandb:
+                        wandb.log({split + f"chart_few_shot_relearning_curve_area_{i}": plt})
+                    img = img_path / (split + f"few_shot_relearning_curve_area_{i}.pdf")
+                    plt.savefig(img)
+                    subprocess.call(f"pdfcrop {img} {img}", shell=True)
+
+                    # Few shot learning curve area
+                    plt.figure(figsize=figsize)
+                    x = list(results[split + f"few_shot_relearning_curve_area_difference_{i}"].keys())
+                    y = list(results[split + f"few_shot_relearning_curve_area_difference_{i}"].values())
+                    plt.plot(x, y)
+                    if use_wandb:
+                        wandb.log({split + f"chart_few_shot_relearning_curve_area_zero_shot_difference_{i}": plt})
+                    img = img_path / (split + f"few_shot_relearning_curve_area_difference_{i}.pdf")
+                    plt.savefig(img)
+                    subprocess.call(f"pdfcrop {img} {img}", shell=True)
+
+                    # Few shot learning curve area
+                    plt.figure(figsize=figsize)
+                    x = list(results[split + f"few_shot_learning_speed_{i}"].keys())
+                    y = list(results[split + f"few_shot_learning_speed_{i}"].values())
+                    plt.plot(x, y)
+                    if use_wandb:
+                        wandb.log({split + f"chart_few_shot_learning_speed_{i}": plt})
+                    img = img_path / (split + f"few_shot_learning_speed_{i}.pdf")
+                    plt.savefig(img)
+                    subprocess.call(f"pdfcrop {img} {img}", shell=True)
+
+        # Online accuracy
+        if "accuracy" in online_df.columns:
+            plt.figure(figsize=figsize)
+            plt.plot(online_df["examples_seen"], online_df["accuracy"])
+            if use_wandb:
+                wandb.log({"chart_online_accuracy": plt})
+            img = img_path / "online_accuracy.pdf"
+            plt.savefig(img)
+            # crop the image
+            subprocess.call(f"pdfcrop {img} {img}", shell=True)
+
+        if "few_shot_learning_curve_area_0" in results:
+            # first encounter learning curve area difference
+            plt.figure(figsize=figsize)
+            x = list(results[f"first_encounter_learning_curve_area_difference"].keys())
+            y = list(results[f"first_encounter_learning_curve_area_difference"].values())
             plt.plot(x, y)
             if use_wandb:
-                wandb.log({f"chart_few_shot_accuracy_{i}": plt})
-            img = img_path / f"few_shot_accuracy_{i}.pdf"
+                wandb.log({f"chart_first_encounter_lca": plt})
+            img = img_path / f"first_encounter_learning_curve_area_difference.pdf"
             plt.savefig(img)
             subprocess.call(f"pdfcrop {img} {img}", shell=True)
 
-    # Online accuracy
-    if "accuracy" in online_df.columns:
-        plt.figure(figsize=figsize)
-        plt.plot(online_df["examples_seen"], online_df["accuracy"])
-        if use_wandb:
-            wandb.log({"chart_online_accuracy": plt})
-        img = img_path / "online_accuracy.pdf"
-        plt.savefig(img)
-        # crop the image
-        subprocess.call(f"pdfcrop {img} {img}", shell=True)
-
-    if "few_shot_learning_curve_area_0" in results:
-        # first encounter learning curve area difference
-        plt.figure(figsize=figsize)
-        x = list(results[f"first_encounter_learning_curve_area_difference"].keys())
-        y = list(results[f"first_encounter_learning_curve_area_difference"].values())
-        plt.plot(x, y)
-        if use_wandb:
-            wandb.log({f"chart_first_encounter_lca": plt})
-        img = img_path / f"first_encounter_learning_curve_area_difference.pdf"
-        plt.savefig(img)
-        subprocess.call(f"pdfcrop {img} {img}", shell=True)
-
-        # first encounter learning speed
-        plt.figure(figsize=figsize)
-        x = list(results[f"first_encounter_learning_speed"].keys())
-        y = list(results[f"first_encounter_learning_speed"].values())
-        plt.plot(x, y)
-        if use_wandb:
-            wandb.log({f"chart_first_encounter_learning_speed": plt})
-        img = img_path / f"first_encounter_learning_speed.pdf"
-        plt.savefig(img)
-        subprocess.call(f"pdfcrop {img} {img}", shell=True)
-
-        # Few shot learning curve area
-        for i, _ in enumerate(metrics["evaluation"]["few_shot"]):
+            # first encounter learning speed
             plt.figure(figsize=figsize)
-            x = list(results[f"few_shot_learning_curve_area_{i}"].keys())
-            y = list(results[f"few_shot_learning_curve_area_{i}"].values())
+            x = list(results[f"first_encounter_learning_speed"].keys())
+            y = list(results[f"first_encounter_learning_speed"].values())
             plt.plot(x, y)
             if use_wandb:
-                wandb.log({f"chart_few_shot_lca_{i}": plt})
-            img = img_path / f"few_shot_learning_curve_area_{i}.pdf"
+                wandb.log({f"chart_first_encounter_learning_speed": plt})
+            img = img_path / f"first_encounter_learning_speed.pdf"
             plt.savefig(img)
             subprocess.call(f"pdfcrop {img} {img}", shell=True)
 
-            # Few shot learning curve area
-            plt.figure(figsize=figsize)
-            x = list(results[f"few_shot_learning_curve_area_difference_{i}"].keys())
-            y = list(results[f"few_shot_learning_curve_area_difference_{i}"].values())
-            plt.plot(x, y)
-            if use_wandb:
-                wandb.log({f"chart_few_shot_lca_zero_shot_difference_{i}": plt})
-            img = img_path / f"few_shot_learning_curve_area_difference_{i}.pdf"
-            plt.savefig(img)
-            subprocess.call(f"pdfcrop {img} {img}", shell=True)
 
-            # ---------------------------------------
-            # Few shot learning curve area
+        if "few_shot_learning_speed_0" in results:
+            # Few shot learning speed
             plt.figure(figsize=figsize)
-            x = list(results[f"few_shot_relearning_curve_area_{i}"].keys())
-            y = list(results[f"few_shot_relearning_curve_area_{i}"].values())
+            x = list(results[split + f"few_shot_learning_speed_{i}"].keys())
+            y = list(results[split + f"few_shot_learning_speed_{i}"].values())
             plt.plot(x, y)
             if use_wandb:
-                wandb.log({f"chart_few_shot_relearning_curve_area_{i}": plt})
-            img = img_path / f"few_shot_relearning_curve_area_{i}.pdf"
-            plt.savefig(img)
-            subprocess.call(f"pdfcrop {img} {img}", shell=True)
-
-            # Few shot learning curve area
-            plt.figure(figsize=figsize)
-            x = list(results[f"few_shot_relearning_curve_area_difference_{i}"].keys())
-            y = list(results[f"few_shot_relearning_curve_area_difference_{i}"].values())
-            plt.plot(x, y)
-            if use_wandb:
-                wandb.log({f"chart_few_shot_relearning_curve_area_zero_shot_difference_{i}": plt})
-            img = img_path / f"few_shot_relearning_curve_area_difference_{i}.pdf"
-            plt.savefig(img)
-            subprocess.call(f"pdfcrop {img} {img}", shell=True)
-
-            # Few shot learning curve area
-            plt.figure(figsize=figsize)
-            x = list(results[f"few_shot_learning_speed_{i}"].keys())
-            y = list(results[f"few_shot_learning_speed_{i}"].values())
-            plt.plot(x, y)
-            if use_wandb:
-                wandb.log({f"chart_few_shot_learning_speed_{i}": plt})
+                wandb.log({f"chart_learning_speed_{i}": plt})
             img = img_path / f"few_shot_learning_speed_{i}.pdf"
             plt.savefig(img)
             subprocess.call(f"pdfcrop {img} {img}", shell=True)
 
-    if "few_shot_learning_speed_0" in results:
-        # Few shot learning speed
-        plt.figure(figsize=figsize)
-        x = list(results[f"few_shot_learning_speed_{i}"].keys())
-        y = list(results[f"few_shot_learning_speed_{i}"].values())
-        plt.plot(x, y)
-        if use_wandb:
-            wandb.log({f"chart_learning_speed_{i}": plt})
-        img = img_path / f"few_shot_learning_speed_{i}.pdf"
-        plt.savefig(img)
-        subprocess.call(f"pdfcrop {img} {img}", shell=True)
+        #  task shifts
+        # plt.figure(figsize=figsize)
+        # task_shifts = online_df[online_df.task.shift() != online_df.task].examples_seen - 16
 
-    #  task shifts
-    # plt.figure(figsize=figsize)
-    # task_shifts = online_df[online_df.task.shift() != online_df.task].examples_seen - 16
-
-    # ax = online_df.plot(x="examples_seen", y="accuracy")
-    # ax.vlines(x=task_shifts, ymin=0, ymax=1, color="black", linestyles="dashed")
-    # img = img_path / "task_shifts.pdf"
-    # plt.savefig(img)
-    # subprocess.call(f"pdfcrop {img} {img}", shell=True)
+        # ax = online_df.plot(x="examples_seen", y="accuracy")
+        # ax.vlines(x=task_shifts, ymin=0, ymax=1, color="black", linestyles="dashed")
+        # img = img_path / "task_shifts.pdf"
+        # plt.savefig(img)
+        # subprocess.call(f"pdfcrop {img} {img}", shell=True)
 
     return results_flattened
 
