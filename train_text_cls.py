@@ -97,7 +97,7 @@ def main(config):
 
     # validation set
     logger.info("----------Validation starts here----------\n")
-    learner.testing(datasets, order=datasets["order"], split=config.testing.eval_split)
+    learner.testing(datasets, order=datasets["order"])
     learner.write_metrics()
     validation_results = analyze_results(metrics_path=learner.results_dir / METRICS_FILE,
                                          use_wandb=config.wandb)
