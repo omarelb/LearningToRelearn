@@ -1,4 +1,5 @@
 import os
+from pickle import load
 import sys
 import logging
 from typing import Tuple
@@ -98,7 +99,7 @@ class Learner:
 
         # Test and evaluation results saved here
         self.results_dir = self.exp_dir / RESULTS_DIR
-        if self.results_dir.is_dir() and not "evaluate" in self.config and not self.config.name == "test":
+        if (self.results_dir / "results.json").is_file() and not "evaluate" in self.config and not self.config.name == "test":
             raise Exception(f"This experiment directory, {self.exp_dir}, already exists. Use a different experiment name "
                             "or different seed. If evaluating, specify the evaluate flag when running the program."
             )
@@ -197,7 +198,7 @@ class Learner:
             wandb.log(to_log)
         return result
 
-    def testing(self, datasets, order, split="val"):
+    def testing(self, datasets, order):
         """
         Evaluate the learner after training.
 
@@ -209,22 +210,25 @@ class Learner:
             Specifies order of encountered datasets
         """
         train_datasets = datasets_dict(datasets["train"], order)
-        eval_datasets = datasets[split]
-        eval_datasets = datasets_dict(eval_datasets, order)
-        self.set_eval()
+        for split in ("test", "val"):
+            self.logger.info(f"Validating on split {split}")
+            eval_datasets = datasets[split]
+            eval_datasets = datasets_dict(eval_datasets, order)
+            self.set_eval()
 
-        if self.config.testing.average_accuracy:
-            self.average_accuracy(eval_datasets, train_datasets=train_datasets)
-        if self.config.testing.few_shot:
-            # split into training and testing point, assumes there is no meaningful difference in dataset order
-            dataset = eval_datasets[self.config.testing.eval_dataset]
-            train_dataset = dataset.new(0, self.config.testing.n_samples)
-            eval_dataset = dataset.new(self.config.testing.n_samples, -1)
-            # sample a subset so validation doesn't take too long
-            eval_dataset = eval_dataset.sample(min(self.config.testing.few_shot_validation_size, len(eval_dataset)))
-            self.few_shot_testing(train_dataset=train_dataset, eval_dataset=eval_dataset)
+            if self.config.testing.average_accuracy:
+                self.average_accuracy(eval_datasets, split=split, train_datasets=train_datasets)
 
-    def average_accuracy(self, datasets, train_datasets=None):
+            if self.config.testing.few_shot:
+                # split into training and testing point, assumes there is no meaningful difference in dataset order
+                dataset = eval_datasets[self.config.testing.eval_dataset]
+                train_dataset = dataset.new(0, self.config.testing.n_samples)
+                eval_dataset = dataset.new(self.config.testing.n_samples, -1)
+                # sample a subset so validation doesn't take too long
+                eval_dataset = eval_dataset.sample(min(self.config.testing.few_shot_validation_size, len(eval_dataset)))
+                self.few_shot_testing(train_dataset=train_dataset, eval_dataset=eval_dataset, split=split)
+
+    def average_accuracy(self, datasets, split, train_datasets=None):
         results = {}
         accuracies, precisions, recalls, f1s = [], [], [], []
 
@@ -254,14 +258,15 @@ class Learner:
                         mean_results["accuracy"], mean_results["precision"], mean_results["recall"],
                         mean_results["f1"]
                     ))
-        self.metrics["evaluation"]["individual"] = results
-        self.metrics["evaluation"]["average"] = mean_results
+        metrics_name = split + "_evaluation"
+        self.metrics[metrics_name]["individual"] = results
+        self.metrics[metrics_name]["average"] = mean_results
         if self.config.wandb:
             wandb.log({
-                "testing_average_accuracy": mean_results["accuracy"]
+                split + "_testing_average_accuracy": mean_results["accuracy"]
             })
 
-    def few_shot_testing(self, train_dataset, eval_dataset, increment_counters=False):
+    def few_shot_testing(self, train_dataset, eval_dataset, increment_counters=False, split="test"):
         """
         Allow the model to train on a small amount of datapoints at a time. After every training step,
         evaluate on many samples that haven't been seen yet.
@@ -279,7 +284,10 @@ class Learner:
         """
         self.logger.info(f"few shot testing on dataset {self.config.testing.eval_dataset} "
                          f"with {len(train_dataset)} samples")
-        train_dataloader, eval_dataloader = self.few_shot_preparation(train_dataset, eval_dataset)
+        # whenever we do few shot evaluation, we reset the learning to before the evaluation started
+        temp_checkpoint = "few_shot_temp_checkpoint.pt"
+        self.save_checkpoint(file_name=temp_checkpoint, save_optimizer_state=True, delete_previous=False)
+        train_dataloader, eval_dataloader = self.few_shot_preparation(train_dataset, eval_dataset, split=split)
         all_predictions, all_labels = [], []
 
         for i, (text, labels, datasets) in enumerate(train_dataloader):
@@ -289,30 +297,36 @@ class Learner:
             all_labels.extend(labels.tolist())
 
             dataset_results = self.evaluate(dataloader=eval_dataloader)
-            self.log_few_shot(all_predictions, all_labels, datasets, dataset_results, increment_counters, text, i)
+            self.log_few_shot(all_predictions, all_labels, datasets, dataset_results, increment_counters,
+                              text, i, split=split)
             if (i * self.config.testing.few_shot_batch_size) % self.mini_batch_size == 0 and i > 0:
                 all_predictions, all_labels = [], []
+        self.load_checkpoint(temp_checkpoint, load_optimizer_state=True)
+        # delete temp checkpoint
+        (self.checkpoint_dir / temp_checkpoint).unlink()
         self.few_shot_counter += 1
 
-    def few_shot_preparation(self, train_dataset, eval_dataset):
+    def few_shot_preparation(self, train_dataset, eval_dataset, split="test"):
         """Few shot preparation code that isn't specific to any learner"""
-        if "few_shot" not in self.metrics["evaluation"]:
-            self.metrics["evaluation"]["few_shot"] = []
-            self.metrics["evaluation"]["few_shot_training"] = []
+        metrics_entry = split + "_evaluation"
+        if "few_shot" not in self.metrics[metrics_entry]:
+            self.metrics[metrics_entry]["few_shot"] = []
+            self.metrics[metrics_entry]["few_shot_training"] = []
         # TODO: evaluate on all datasets instead of just one.
         train_dataloader = DataLoader(train_dataset, batch_size=self.config.testing.few_shot_batch_size, shuffle=False)
         eval_dataloader = DataLoader(eval_dataset, batch_size=self.mini_batch_size, shuffle=False)
 
         # split into training and testing point, assumes there is no meaningful difference in dataset order
         self.logger.info(f"Validating with test set of size {len(eval_dataset)}")
-        self.metrics["evaluation"]["few_shot"].append([])
-        self.metrics["evaluation"]["few_shot_training"].append([])
+        self.metrics[metrics_entry]["few_shot"].append([])
+        self.metrics[metrics_entry]["few_shot_training"].append([])
         
         return train_dataloader, eval_dataloader
 
     def log_few_shot(self, all_predictions, all_labels, datasets, dataset_results, increment_counters, text,
-                     few_shot_batch):
+                     few_shot_batch, split="test"):
         """Few shot preparation code that isn't specific to any learner"""
+        metrics_entry = split + "_evaluation"
         test_results = {
             "examples_seen": few_shot_batch * self.config.testing.few_shot_batch_size,
             "examples_seen_total": self.examples_seen(),
@@ -327,7 +341,7 @@ class Learner:
                 "accuracy": online_metrics["accuracy"],
                 "task": datasets[0]  # assume whole batch is from same task
             }
-            self.metrics["evaluation"]["few_shot_training"][-1].append(train_results)
+            self.metrics[metrics_entry]["few_shot_training"][-1].append(train_results)
             if increment_counters:
                 self.metrics["online"].append({
                     "accuracy": online_metrics["accuracy"],
@@ -336,7 +350,7 @@ class Learner:
                 })
         if increment_counters:
             self._examples_seen += len(text)
-        self.metrics["evaluation"]["few_shot"][-1].append(test_results)
+        self.metrics[metrics_entry]["few_shot"][-1].append(test_results)
         if self.config.wandb:
             # replace with new name
             test_results = test_results.copy()
@@ -368,7 +382,7 @@ class Learner:
             replay_steps = 0
         return replay_freq, replay_steps
 
-    def save_checkpoint(self, file_name: str = None):
+    def save_checkpoint(self, file_name: str = None, save_optimizer_state=None, delete_previous=False):
         """Save checkpoint in the checkpoint directory.
 
         Checkpoint directory and checkpoint file need to be specified in the configs.
@@ -388,22 +402,23 @@ class Learner:
             "best_loss": self.best_loss,
             "model_state": self.model_state()
         }
-        if self.config.save_optimizer_state:
+        if (save_optimizer_state is not None and save_optimizer_state) or self.config.save_optimizer_state:
             state["optimizer"] = self.optimizer_state()
         state = self.save_other_state_information(state)
         # delete previous checkpoint to avoid hogging space
-        if self.config.delete_previous_checkpoint:
+        if delete_previous or self.config.delete_previous_checkpoint:
             previous_checkpoint = self.get_last_checkpoint_path()
             if previous_checkpoint is not None and previous_checkpoint.is_file():
                 previous_checkpoint.unlink()
         torch.save(state, file_name)
+        self.write_metrics()
         self.logger.info(f"Checkpoint saved @ {file_name}")
 
     def save_other_state_information(self, state):
         """Any learner specific state information is added here"""
         return state
 
-    def load_checkpoint(self, file_name: str = None):
+    def load_checkpoint(self, file_name: str = None, load_optimizer_state=False):
         """Load the checkpoint with the given file name
 
         Checkpoint must contain:
@@ -431,16 +446,11 @@ class Learner:
             self.best_accuracy = checkpoint["best_accuracy"]
             self.best_loss = checkpoint["best_loss"]
             self.load_model_state(checkpoint)
-            if self.config.save_optimizer_state:
+            if load_optimizer_state or self.config.save_optimizer_state:
                 self.load_optimizer_state(checkpoint)
             self.load_other_state_information(checkpoint)
         except OSError:
             self.logger.error(f"No checkpoint exists @ {self.checkpoint_dir}")
-        try:
-            with open(self.results_dir / METRICS_FILE) as f:
-                self.metrics = json.load(f)
-        except OSError:
-            self.logger.error("Failed loading metrics file")
 
     def model_state(self):
         return self.model.state_dict()
