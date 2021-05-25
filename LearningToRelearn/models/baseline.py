@@ -4,6 +4,7 @@ import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
+from torch.utils.data.dataset import ConcatDataset
 from transformers import AdamW
 import wandb
 
@@ -36,7 +37,7 @@ class Baseline(Learner):
     def training(self, datasets, **kwargs):
         # train_datasets = {dataset_name: dataset for dataset_name, dataset in zip(datasets["order"], datasets["train"])}
         train_datasets = datasets_dict(datasets["train"], datasets["order"])
-        val_datasets = datasets_dict(datasets["val"], datasets["order"])
+        val_datasets = datasets_dict(datasets["test"], datasets["order"])
         eval_dataset = val_datasets[self.config.testing.eval_dataset]
         eval_dataset = eval_dataset.sample(min(self.config.testing.few_shot_validation_size, len(eval_dataset)))
 
@@ -48,18 +49,23 @@ class Baseline(Learner):
             n_samples, order = n_samples_order(self.config.learner.samples_per_task, self.config.task_order, datasets["order"])
         datas = get_continuum(train_datasets, order=order, n_samples=n_samples,
                              eval_dataset=self.config.testing.eval_dataset, merge=False)
+        if self.config.learner.multitask:
+            data = ConcatDataset(datas)
+            train_dataloader = DataLoader(data, batch_size=self.mini_batch_size, shuffle=True)
+            self.train(dataloader=train_dataloader, datasets=datasets)
+
         for data, dataset_name, n_sample in zip(datas, order, n_samples):
             self.logger.info(f"Observing dataset {dataset_name} for {n_sample} samples. "
                              f"Evaluation={dataset_name=='evaluation'}")
             if dataset_name == "evaluation":
                 self.few_shot_testing(train_dataset=data, eval_dataset=eval_dataset, increment_counters=True)
             else:
-                train_dataloader = DataLoader(data, batch_size=self.mini_batch_size, shuffle=self.config.learner.multitask)
+                train_dataloader = DataLoader(data, batch_size=self.mini_batch_size, shuffle=False)
                 self.train(dataloader=train_dataloader, datasets=datasets, dataset_name=dataset_name, max_samples=n_sample)
             if dataset_name == self.config.testing.eval_dataset:
                 self.eval_task_first_encounter = False
 
-    def train(self, dataloader=None, datasets=None, dataset_name=None, max_samples=10000):
+    def train(self, dataloader=None, datasets=None, dataset_name=None, max_samples=None):
         val_datasets = datasets_dict(datasets["val"], datasets["order"])
         replay_freq, replay_steps = self.replay_parameters()
 
@@ -87,14 +93,13 @@ class Baseline(Learner):
                     self.write_metrics()
                 if self.current_iter % self.validate_freq == 0:
                     self.validate(val_datasets, n_samples=self.config.training.n_validation_samples)
-
                 if self.replay_rate != 0 and (self.current_iter + 1) % replay_freq == 0:
                     self.replay_training_step(replay_steps, episode_samples_seen, max_samples)
                 self.memory.write_batch(text, labels)
                 self._examples_seen += len(text)
                 episode_samples_seen += len(text)
                 self.current_iter += 1
-                if episode_samples_seen >= max_samples:
+                if max_samples is not None and episode_samples_seen >= max_samples:
                     break
 
     def training_step(self, text, labels):
@@ -124,7 +129,7 @@ class Baseline(Learner):
             self._examples_seen += len(text)
             self.metrics["replay_samples_seen"] += len(text)
             episode_samples_seen += len(text)
-            if episode_samples_seen >= max_samples:
+            if max_samples is not None and episode_samples_seen >= max_samples:
                 break
 
         params = [p for p in self.model.parameters() if p.requires_grad]
