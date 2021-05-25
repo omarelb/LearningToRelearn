@@ -335,7 +335,7 @@ class MAML(Learner):
     def set_train(self):
         self.pn.train()
 
-    def few_shot_testing(self, train_dataset, eval_dataset, increment_counters=False):
+    def few_shot_testing(self, train_dataset, eval_dataset, increment_counters=False, split="test"):
         """
         Allow the model to train on a small amount of datapoints at a time. After every training step,
         evaluate on many samples that haven't been seen yet.
@@ -353,7 +353,7 @@ class MAML(Learner):
         """
         self.logger.info(f"few shot testing on dataset {self.config.testing.eval_dataset} "
                          f"with {len(train_dataset)} samples")
-        train_dataloader, eval_dataloader = self.few_shot_preparation(train_dataset, eval_dataset)
+        train_dataloader, eval_dataloader = self.few_shot_preparation(train_dataset, eval_dataset, split=split)
         all_predictions, all_labels = [], []
         with higher.innerloop_ctx(self.pn, self.inner_optimizer,
                                 copy_initial_weights=False,
@@ -370,7 +370,8 @@ class MAML(Learner):
                 all_predictions.extend(predictions.tolist())
                 all_labels.extend(labels.tolist())
                 dataset_results = self.evaluate(dataloader=eval_dataloader, prediction_network=fpn)
-                self.log_few_shot(all_predictions, all_labels, datasets, dataset_results, increment_counters, text, i)
+                self.log_few_shot(all_predictions, all_labels, datasets, dataset_results,
+                                  increment_counters, text, i, split=split)
                 if (i * self.config.testing.few_shot_batch_size) % self.mini_batch_size == 0 and i > 0:
                     all_predictions, all_labels = [], []
         self.few_shot_counter += 1
