@@ -111,17 +111,17 @@ def get_forgetting(few_shot_metrics, metrics):
     first_evaluation = few_shot_metrics[0]
     max_examples_seen = first_evaluation["examples_seen_total"]
     # get entries of task before this evaluation
-    filtered = [entry for entry in metrics["online"] if entry["examples_seen"] < max_examples_seen and
-                entry["task"] == first_evaluation["task"]]
-    if len(filtered) > 1:
-        best_previous_accuracy = max(entry["accuracy"] for entry in filtered)
-        first_eval_accuracy = first_evaluation["accuracy"]
-        forgetting = best_previous_accuracy - first_eval_accuracy
-        try:
-            forgetting_normalized = forgetting / (best_previous_accuracy - first_encounter_accuracy)
-        except ZeroDivisionError as e:
-            print(e)
-            forgetting_normalized = None
+    # filtered = [entry for entry in metrics["online"] if entry["examples_seen"] < max_examples_seen and
+    #             entry["task"] == first_evaluation["task"]]
+    # if len(filtered) > 1:
+    best_previous_accuracy = max([entry["accuracy"] for entry in metrics["eval_task_first_encounter"]])
+    first_eval_accuracy = first_evaluation["accuracy"]
+    forgetting = best_previous_accuracy - first_eval_accuracy
+    try:
+        forgetting_normalized = forgetting / (best_previous_accuracy - first_encounter_accuracy)
+    except ZeroDivisionError as e:
+        print(e)
+        forgetting_normalized = None
     return forgetting, forgetting_normalized
 
 def collect_results(metrics):
