@@ -58,7 +58,7 @@ class Baseline(Learner):
             self.logger.info(f"Observing dataset {dataset_name} for {n_sample} samples. "
                              f"Evaluation={dataset_name=='evaluation'}")
             if dataset_name == "evaluation":
-                self.few_shot_testing(train_dataset=data, eval_dataset=eval_dataset, increment_counters=True)
+                self.few_shot_testing(train_dataset=data, eval_dataset=eval_dataset, increment_counters=False)
             else:
                 train_dataloader = DataLoader(data, batch_size=self.mini_batch_size, shuffle=False)
                 self.train(dataloader=train_dataloader, datasets=datasets, dataset_name=dataset_name, max_samples=n_sample)
@@ -67,7 +67,7 @@ class Baseline(Learner):
 
     def train(self, dataloader=None, datasets=None, dataset_name=None, max_samples=None):
         val_datasets = datasets_dict(datasets["val"], datasets["order"])
-        replay_freq, replay_steps = self.replay_parameters()
+        replay_freq, replay_steps = self.replay_parameters(metalearner=False)
 
         episode_samples_seen = 0 # have to keep track of per-task samples seen as we might use replay as well
         for _ in range(self.n_epochs):

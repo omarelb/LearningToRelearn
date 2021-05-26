@@ -61,7 +61,7 @@ class OML(Learner):
             self.logger.info(f"Observing dataset {dataset_name} for {n_sample} samples. "
                              f"Evaluation={dataset_name=='evaluation'}")
             if dataset_name == "evaluation":
-                self.few_shot_testing(train_dataset=data, eval_dataset=eval_dataset, increment_counters=True)
+                self.few_shot_testing(train_dataset=data, eval_dataset=eval_dataset, increment_counters=False)
             else:
                 train_dataloader = iter(DataLoader(data, batch_size=self.mini_batch_size, shuffle=False))
                 self.episode_samples_seen = 0 # have to keep track of per-task samples seen as we might use replay as well

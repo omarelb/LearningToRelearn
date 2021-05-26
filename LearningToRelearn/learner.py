@@ -372,10 +372,12 @@ class Learner:
         self.tracker["predictions"].extend(predictions.tolist())
         self.tracker["labels"].extend(labels.tolist())
 
-    def replay_parameters(self):
+    def replay_parameters(self, metalearner=True):
+        """Calculate replay frequency and number of steps"""
         if self.replay_rate != 0:
-            replay_batch_freq = self.replay_every // self.mini_batch_size
-            replay_freq = int(math.ceil((replay_batch_freq + 1) / (self.config.learner.updates + 1)))
+            replay_freq = self.replay_every // self.mini_batch_size
+            if metalearner:
+                replay_freq = int(math.ceil((replay_freq + 1) / (self.config.learner.updates + 1)))
             replay_steps = max(int(self.replay_every * self.replay_rate / self.mini_batch_size), 1)
         else:
             replay_freq = 0
