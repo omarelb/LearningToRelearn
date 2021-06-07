@@ -35,25 +35,7 @@ class Baseline(Learner):
         self.memory = ReplayMemory(write_prob=self.write_prob, tuple_size=2)
 
     def training(self, datasets, **kwargs):
-        # train_datasets = {dataset_name: dataset for dataset_name, dataset in zip(datasets["order"], datasets["train"])}
-        train_datasets = datasets_dict(datasets["train"], datasets["order"])
-        val_datasets = datasets_dict(datasets["test"], datasets["order"])
-        eval_dataset = val_datasets[self.config.testing.eval_dataset]
-        if self.config.testing.few_shot:
-            # split into training and testing point, assumes there is no meaningful difference in dataset order
-            eval_train_dataset = eval_dataset.new(0, self.config.testing.n_samples)
-            eval_eval_dataset = eval_dataset.new(self.config.testing.n_samples, -1)
-            # sample a subset so validation doesn't take too long
-            eval_eval_dataset = eval_eval_dataset.sample(min(self.config.testing.few_shot_validation_size, len(eval_dataset)))
-
-        if self.config.data.alternating_order:
-            order, n_samples = alternating_order(train_datasets, tasks=self.config.data.alternating_tasks,
-                                                 n_samples_per_switch=self.config.data.alternating_n_samples_per_switch,
-                                                 relative_frequencies=self.config.data.alternating_relative_frequencies)
-        else:
-            n_samples, order = n_samples_order(self.config.learner.samples_per_task, self.config.task_order, datasets["order"])
-        datas = get_continuum(train_datasets, order=order, n_samples=n_samples,
-                             eval_dataset=self.config.testing.eval_dataset, merge=False)
+        datas, order, n_samples, eval_train_dataset, eval_eval_dataset = self.prepare_data(datasets)
         if self.config.learner.multitask:
             data = ConcatDataset([ClassificationDataset(d.dataset.name, d.dataset.data.iloc[d.indices]) for d in datas])
             train_dataloader = DataLoader(data, batch_size=self.mini_batch_size, shuffle=True)

@@ -45,23 +45,11 @@ class OML(Learner):
         self.inner_optimizer = optim.SGD(inner_params, lr=self.inner_lr)
 
     def training(self, datasets, **kwargs):
-        train_datasets = datasets_dict(datasets["train"], datasets["order"])
-        val_datasets = datasets_dict(datasets["test"], datasets["order"])
-        eval_dataset = val_datasets[self.config.testing.eval_dataset]
-        if self.config.testing.few_shot:
-            # split into training and testing point, assumes there is no meaningful difference in dataset order
-            eval_train_dataset = eval_dataset.new(0, self.config.testing.n_samples)
-            eval_eval_dataset = eval_dataset.new(self.config.testing.n_samples, -1)
-            # sample a subset so validation doesn't take too long
-            eval_eval_dataset = eval_eval_dataset.sample(min(self.config.testing.few_shot_validation_size, len(eval_dataset)))
-
         replay_freq, replay_steps = self.replay_parameters()
         self.logger.info("Replay frequency: {}".format(replay_freq))
         self.logger.info("Replay steps: {}".format(replay_steps))
 
-        n_samples, order = n_samples_order(self.config.learner.samples_per_task, self.config.task_order, datasets["order"])
-        datas = get_continuum(train_datasets, order=order, n_samples=n_samples,
-                             eval_dataset=self.config.testing.eval_dataset, merge=False)
+        datas, order, n_samples, eval_train_dataset, eval_eval_dataset = self.prepare_data(datasets)
         for data, dataset_name, n_sample in zip(datas, order, n_samples):
             self.logger.info(f"Observing dataset {dataset_name} for {n_sample} samples. "
                              f"Evaluation={dataset_name=='evaluation'}")
@@ -82,7 +70,7 @@ class OML(Learner):
 
                     self.training_step(support_set, query_set, task=task)
 
-                    self.log()
+                    self.meta_training_log()
                     self.write_metrics()
                     self.current_iter += 1
                     if self.episode_samples_seen >= n_sample:
@@ -197,38 +185,6 @@ class OML(Learner):
             "query_labels": []
         }
 
-    def log(self):
-        support_loss = np.mean(self.tracker["support_loss"])
-        query_loss = np.mean(self.tracker["query_loss"])
-        support_metrics = model_utils.calculate_metrics(self.tracker["support_predictions"], self.tracker["support_labels"])
-        query_metrics = model_utils.calculate_metrics(self.tracker["query_predictions"], self.tracker["query_labels"])
-
-        self.logger.debug(
-            f"Episode {self.current_iter + 1} Support set: Loss = {support_loss:.4f}, "
-            f"accuracy = {support_metrics['accuracy']:.4f}, precision = {support_metrics['precision']:.4f}, "
-            f"recall = {support_metrics['recall']:.4f}, F1 score = {support_metrics['f1']:.4f}"
-        )
-        self.logger.debug(
-            f"Episode {self.current_iter + 1} Query set: Loss = {query_loss:.4f}, "
-            f"accuracy = {query_metrics['accuracy']:.4f}, precision = {query_metrics['precision']:.4f}, "
-            f"recall = {query_metrics['recall']:.4f}, F1 score = {query_metrics['f1']:.4f}"
-        )
-        if self.config.wandb:
-            wandb.log({
-                "support_accuracy": support_metrics['accuracy'],
-                "support_precision": support_metrics['precision'],
-                "support_recall": support_metrics['recall'],
-                "support_f1": support_metrics['f1'],
-                "support_loss": support_loss,
-                "query_accuracy": query_metrics['accuracy'],
-                "query_precision": query_metrics['precision'],
-                "query_recall": query_metrics['recall'],
-                "query_f1": query_metrics['f1'],
-                "query_loss": query_loss,
-                "examples_seen": self.examples_seen()
-            })
-        self.reset_tracker()
-
     def evaluate(self, dataloader, prediction_network=None):
         if self.config.learner.evaluation_support_set:
             support_set = []
@@ -308,46 +264,6 @@ class OML(Learner):
 
     def load_other_state_information(self, checkpoint):
         self.memory = checkpoint["memory"]
-
-    def get_support_set(self, data_iterator, max_sample):
-        """Return a list of datapoints, and return None if the end of the data is reached."""
-        support_set = []
-        for _ in range(self.config.learner.updates):
-            try:
-                text, labels, datasets = next(data_iterator)
-                support_set.append((text, labels))
-                self.episode_samples_seen += len(text)
-            except StopIteration:
-                # self.logger.info("Terminating training as all the data is seen")
-                return None, None
-            if self.episode_samples_seen >= max_sample:
-                break
-        return support_set, datasets[0]
-
-    def get_query_set(self, data_iterator, replay_freq, replay_steps, max_sample):
-        """Return a list of datapoints, and return None if the end of the data is reached."""
-        query_set = []
-        if self.replay_rate != 0 and (self.current_iter + 1) % replay_freq == 0:
-            # now we replay from memory
-            self.logger.debug("query set read from memory")
-            for _ in range(replay_steps):
-                text, labels = self.memory.read_batch(batch_size=self.mini_batch_size)
-                query_set.append((text, labels))
-                self.episode_samples_seen += len(text)
-                self.metrics["replay_samples_seen"] += len(text)
-                if self.episode_samples_seen >= max_sample:
-                    break
-        else:
-            # otherwise simply use next batch from data stream as query set
-            try:
-                text, labels, _ = next(data_iterator)
-                query_set.append((text, labels))
-                self.memory.write_batch(text, labels)
-                self.episode_samples_seen += len(text)
-            except StopIteration:
-                # self.logger.info("Terminating training as all the data is seen")
-                return None
-        return query_set
 
     def set_eval(self):
         self.pln.eval()
