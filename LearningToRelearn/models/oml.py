@@ -46,9 +46,14 @@ class OML(Learner):
 
     def training(self, datasets, **kwargs):
         train_datasets = datasets_dict(datasets["train"], datasets["order"])
-        val_datasets = datasets_dict(datasets["val"], datasets["order"])
+        val_datasets = datasets_dict(datasets["test"], datasets["order"])
         eval_dataset = val_datasets[self.config.testing.eval_dataset]
-        eval_dataset = eval_dataset.sample(min(self.config.testing.few_shot_validation_size, len(eval_dataset)))
+        if self.config.testing.few_shot:
+            # split into training and testing point, assumes there is no meaningful difference in dataset order
+            eval_train_dataset = eval_dataset.new(0, self.config.testing.n_samples)
+            eval_eval_dataset = eval_dataset.new(self.config.testing.n_samples, -1)
+            # sample a subset so validation doesn't take too long
+            eval_eval_dataset = eval_eval_dataset.sample(min(self.config.testing.few_shot_validation_size, len(eval_dataset)))
 
         replay_freq, replay_steps = self.replay_parameters()
         self.logger.info("Replay frequency: {}".format(replay_freq))
@@ -61,7 +66,8 @@ class OML(Learner):
             self.logger.info(f"Observing dataset {dataset_name} for {n_sample} samples. "
                              f"Evaluation={dataset_name=='evaluation'}")
             if dataset_name == "evaluation":
-                self.few_shot_testing(train_dataset=data, eval_dataset=eval_dataset, increment_counters=False)
+                self.few_shot_testing(train_dataset=eval_train_dataset, eval_dataset=eval_eval_dataset, split="test",
+                                      increment_counters=False)
             else:
                 train_dataloader = iter(DataLoader(data, batch_size=self.mini_batch_size, shuffle=False))
                 self.episode_samples_seen = 0 # have to keep track of per-task samples seen as we might use replay as well
@@ -197,12 +203,12 @@ class OML(Learner):
         support_metrics = model_utils.calculate_metrics(self.tracker["support_predictions"], self.tracker["support_labels"])
         query_metrics = model_utils.calculate_metrics(self.tracker["query_predictions"], self.tracker["query_labels"])
 
-        self.logger.info(
+        self.logger.debug(
             f"Episode {self.current_iter + 1} Support set: Loss = {support_loss:.4f}, "
             f"accuracy = {support_metrics['accuracy']:.4f}, precision = {support_metrics['precision']:.4f}, "
             f"recall = {support_metrics['recall']:.4f}, F1 score = {support_metrics['f1']:.4f}"
         )
-        self.logger.info(
+        self.logger.debug(
             f"Episode {self.current_iter + 1} Query set: Loss = {query_loss:.4f}, "
             f"accuracy = {query_metrics['accuracy']:.4f}, precision = {query_metrics['precision']:.4f}, "
             f"recall = {query_metrics['recall']:.4f}, F1 score = {query_metrics['f1']:.4f}"
@@ -276,7 +282,7 @@ class OML(Learner):
                 #     self.logger.info(f"Batch {i + 1}/{len(dataloader)} processed")
 
         results = model_utils.calculate_metrics(all_predictions, all_labels)
-        self.logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
+        self.logger.debug("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
                     "F1 score = {:.4f}".format(np.mean(all_losses), results["accuracy"],
                     results["precision"], results["recall"], results["f1"]))
         return results

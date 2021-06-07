@@ -12,7 +12,7 @@ import LearningToRelearn.datasets.utils as dataset_utils
 import LearningToRelearn.models.utils as model_utils
 from LearningToRelearn.models.base_models import ReplayMemory, TransformerClsModel
 from LearningToRelearn.learner import Learner
-from LearningToRelearn.datasets.text_classification_dataset import get_continuum, alternating_order, datasets_dict, n_samples_order
+from LearningToRelearn.datasets.text_classification_dataset import ClassificationDataset, get_continuum, alternating_order, datasets_dict, n_samples_order
 
 
 class Baseline(Learner):
@@ -39,7 +39,12 @@ class Baseline(Learner):
         train_datasets = datasets_dict(datasets["train"], datasets["order"])
         val_datasets = datasets_dict(datasets["test"], datasets["order"])
         eval_dataset = val_datasets[self.config.testing.eval_dataset]
-        eval_dataset = eval_dataset.sample(min(self.config.testing.few_shot_validation_size, len(eval_dataset)))
+        if self.config.testing.few_shot:
+            # split into training and testing point, assumes there is no meaningful difference in dataset order
+            eval_train_dataset = eval_dataset.new(0, self.config.testing.n_samples)
+            eval_eval_dataset = eval_dataset.new(self.config.testing.n_samples, -1)
+            # sample a subset so validation doesn't take too long
+            eval_eval_dataset = eval_eval_dataset.sample(min(self.config.testing.few_shot_validation_size, len(eval_dataset)))
 
         if self.config.data.alternating_order:
             order, n_samples = alternating_order(train_datasets, tasks=self.config.data.alternating_tasks,
@@ -50,15 +55,16 @@ class Baseline(Learner):
         datas = get_continuum(train_datasets, order=order, n_samples=n_samples,
                              eval_dataset=self.config.testing.eval_dataset, merge=False)
         if self.config.learner.multitask:
-            data = ConcatDataset(datas)
+            data = ConcatDataset([ClassificationDataset(d.dataset.name, d.dataset.data.iloc[d.indices]) for d in datas])
             train_dataloader = DataLoader(data, batch_size=self.mini_batch_size, shuffle=True)
             self.train(dataloader=train_dataloader, datasets=datasets)
-
+            return
         for data, dataset_name, n_sample in zip(datas, order, n_samples):
             self.logger.info(f"Observing dataset {dataset_name} for {n_sample} samples. "
                              f"Evaluation={dataset_name=='evaluation'}")
             if dataset_name == "evaluation":
-                self.few_shot_testing(train_dataset=data, eval_dataset=eval_dataset, increment_counters=False)
+                self.few_shot_testing(train_dataset=eval_train_dataset, eval_dataset=eval_eval_dataset, split="test",
+                                      increment_counters=False)
             else:
                 train_dataloader = DataLoader(data, batch_size=self.mini_batch_size, shuffle=False)
                 self.train(dataloader=train_dataloader, datasets=datasets, dataset_name=dataset_name, max_samples=n_sample)
@@ -173,7 +179,7 @@ class Baseline(Learner):
             #     self.logger.info(f"Batch {i + 1}/{len(dataloader)} processed")
 
         metrics = model_utils.calculate_metrics(all_predictions, all_labels)
-        self.logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
+        self.logger.debug("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
                     "F1 score = {:.4f}".format(np.mean(all_losses), metrics["accuracy"], metrics["precision"],
                                                metrics["recall"], metrics["f1"]))
 

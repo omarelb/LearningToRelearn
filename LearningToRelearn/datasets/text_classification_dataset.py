@@ -336,15 +336,18 @@ def get_continuum(datasets, order=None, n_samples=None, shuffle=False, merge=Tru
         assert eval_dataset is not None, "If `evaluation` is specified as a task, `eval_dataset` needs to be supplied"
     # from pdb import set_trace; set_trace()
     evaluation_mapper = lambda x: eval_dataset if x == "evaluation" else x
-    order = [evaluation_mapper(dataset) for dataset in order]
+    order_substituted = [eval_dataset if dataset == "evaluation" else dataset for dataset in order]
     data_lengths = {dataset_name: len(datasets[dataset_name]) for dataset_name in datasets.keys()}
     # if not specified, use all samples of this dataset
     if n_samples is None or len(n_samples) == 0:
-        n_samples = [data_lengths[dataset_name] for dataset_name in order]
-    assert len(n_samples) == len(order), "order and n_samples must be same length"
+        n_samples = [data_lengths[dataset_name] for dataset_name in order_substituted]
+    for i, name in enumerate(order):
+        if name == "evaluation":
+            n_samples[i] = 0
+    assert len(n_samples) == len(order_substituted), "order and n_samples must be same length"
     # check input correctness
     n_samples_per_task = defaultdict(int)
-    for dataset_name, n_sample in zip(order, n_samples):
+    for dataset_name, n_sample in zip(order_substituted, n_samples):
         n_samples_per_task[dataset_name] += n_sample
         if n_samples_per_task[dataset_name] > data_lengths[dataset_name]:
             raise AssertionError(
@@ -352,21 +355,24 @@ def get_continuum(datasets, order=None, n_samples=None, shuffle=False, merge=Tru
             )
 
     result = []
-    permutation = list(range(len(order)))
+    permutation = list(range(len(order_substituted)))
     if shuffle:
-        # shuffle through the order (not through all samples, as is done with a dataloader)
+        # shuffle through the order_substituted (not through all samples, as is done with a dataloader)
         np.random.shuffle(permutation)
     # keep track of which indices are already used for each task/dataset
     ixs_occupied = {}
     for i in permutation:
-        dataset_name, n_sample = order[i], n_samples[i]
+        dataset_name, n_sample = order_substituted[i], n_samples[i]
         data_len = len(datasets[dataset_name])
         if dataset_name not in ixs_occupied:
             ixs_occupied[dataset_name] = []
-        ixs = np.random.choice(list(set(range(data_len)) - set(ixs_occupied[dataset_name])), size=n_sample,
-                               replace=False)
-        ixs_occupied[dataset_name].extend(ixs)
-        result.append(Subset(datasets[dataset_name], indices=ixs))
+        if n_sample == 0:
+            result.append(Subset(datasets[dataset_name], indices=[]))
+        else:
+            ixs = np.random.choice(list(set(range(data_len)) - set(ixs_occupied[dataset_name])), size=n_sample,
+                                replace=False)
+            ixs_occupied[dataset_name].extend(ixs)
+            result.append(Subset(datasets[dataset_name], indices=ixs))
 
     if merge:
         return ConcatDataset(result)

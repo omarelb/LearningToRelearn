@@ -209,6 +209,7 @@ class Learner:
         order: List[str]
             Specifies order of encountered datasets
         """
+        self.logger.info("Testing..")
         train_datasets = datasets_dict(datasets["train"], order)
         for split in ("test", "val"):
             self.logger.info(f"Validating on split {split}")
@@ -217,6 +218,7 @@ class Learner:
             self.set_eval()
 
             if self.config.testing.average_accuracy:
+                self.logger.info("getting average accuracy")
                 self.average_accuracy(eval_datasets, split=split, train_datasets=train_datasets)
 
             if self.config.testing.few_shot:
@@ -226,6 +228,7 @@ class Learner:
                 eval_dataset = dataset.new(self.config.testing.n_samples, -1)
                 # sample a subset so validation doesn't take too long
                 eval_dataset = eval_dataset.sample(min(self.config.testing.few_shot_validation_size, len(eval_dataset)))
+                self.logger.info(f"Few shot eval dataset size: {len(eval_dataset)}")
                 self.few_shot_testing(train_dataset=train_dataset, eval_dataset=eval_dataset, split=split)
 
     def average_accuracy(self, datasets, split, train_datasets=None):
@@ -281,6 +284,8 @@ class Learner:
             Contains examples on which the model is evaluated
         increment_counters: bool
             If True, update online metrics and current iteration counters.
+        split: str, one of {"val", "test"}.
+            Which data split is used. For logging purposes.
         """
         self.logger.info(f"few shot testing on dataset {self.config.testing.eval_dataset} "
                          f"with {len(train_dataset)} samples")
@@ -308,6 +313,7 @@ class Learner:
 
     def few_shot_preparation(self, train_dataset, eval_dataset, split="test"):
         """Few shot preparation code that isn't specific to any learner"""
+        self.logger.info(f"Few shot evaluation number {self.few_shot_counter}")
         metrics_entry = split + "_evaluation"
         if "few_shot" not in self.metrics[metrics_entry]:
             self.metrics[metrics_entry]["few_shot"] = []
@@ -320,6 +326,7 @@ class Learner:
         self.logger.info(f"Validating with test set of size {len(eval_dataset)}")
         self.metrics[metrics_entry]["few_shot"].append([])
         self.metrics[metrics_entry]["few_shot_training"].append([])
+        self.logger.info(f"Length of few shot metrics {len(self.metrics[metrics_entry]['few_shot'])}")
         
         return train_dataloader, eval_dataloader
 
@@ -351,6 +358,7 @@ class Learner:
         if increment_counters:
             self._examples_seen += len(text)
         self.metrics[metrics_entry]["few_shot"][-1].append(test_results)
+        self.write_metrics()
         if self.config.wandb:
             # replace with new name
             test_results = test_results.copy()
