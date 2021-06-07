@@ -145,7 +145,7 @@ def collect_results(metrics):
     if "accuracy" in online_df.columns:
         results["online_accuracy"] = online_df.accuracy.mean()
     # mean accuracy over all evaluation datasets
-    if "eval_task_first_encounter" in metrics:
+    if "eval_task_first_encounter" in metrics and len(metrics["eval_task_first_encounter"]) > 0:
         results["first_encounter_initial_accuracy"] = metrics["eval_task_first_encounter"][0]["accuracy"]
         results["first_encounter_best_accuracy"] = max(entry["accuracy"] for entry in metrics["eval_task_first_encounter"])
         results[f"first_encounter_learning_curve_area"] = learning_curve_area(metrics["eval_task_first_encounter"])
