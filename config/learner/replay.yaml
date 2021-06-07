@@ -1,5 +1,5 @@
 # @package _group_
 type: baseline
 multitask: false
-lr: 0.00003
+lr: 0.00001
 replay_rate: 0.01 # replay rate from memory

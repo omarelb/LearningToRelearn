@@ -1,5 +1,5 @@
 learner:
   type: baseline # sequential learning
   multitask: false
-  lr: 0.00003 # learning rate
+  lr: 0.00001 # learning rate
   replay_rate: 0 # replay rate from memory

@@ -7,7 +7,7 @@ defaults:
   - hydra/hydra_logging: colorlog
 
 learner:
-  inner_lr: 1e-3
+  inner_lr: 3e-3
   meta_lr: 1e-5
   model_name: bert-base-uncased
   samples_per_task: # default None, which uses all data of each task
@@ -39,14 +39,14 @@ inference: false
 version: 0
 task_order: # if not specified, use task order defined in text_classification_dataset.py
 checkpoint_while_training: true # whether to checkpoint while training
-save_checkpoint: false # whether to save checkpoint after training
+save_checkpoint: true # whether to save checkpoint after training
 save_optimizer_state: false # whether to save the optimizer state when checkpointing
 delete_previous_checkpoint: true # whether to overwrite the previous checkpoint when saving a checkpoint
 save_freq: 60 # in minutes, specifies how often a model is saved
 wandb: true # whether to use weights and biases for logging
 # set to debug mode.
 # some extra logging is done, and a small dataset is used
-debug_logging: true # log debug things
+debug_logging: false # log debug things
 debug_data: false # use a small dataset
 name: # experiment name, not specified by default, making it None
 

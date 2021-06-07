@@ -4,5 +4,5 @@ epochs: 1 # number of epochs
 batch_size: 16
 save_freq: 5000
 log_freq: 50
-validate_freq: 20
+validate_freq: 200
 n_validation_samples: 100
