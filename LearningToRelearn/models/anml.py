@@ -48,32 +48,40 @@ class ANML(Learner):
         self.inner_optimizer = optim.SGD(inner_params, lr=self.inner_lr)
 
     def training(self, datasets, **kwargs):
-        train_datasets = datasets_dict(datasets["train"], datasets["order"])
         replay_freq, replay_steps = self.replay_parameters()
         self.logger.info("Replay frequency: {}".format(replay_freq))
         self.logger.info("Replay steps: {}".format(replay_steps))
 
-        n_samples, order = n_samples_order(self.config.learner.samples_per_task, self.config.task_order, datasets["order"])
-        data = get_continuum(train_datasets, order=order, n_samples=n_samples, eval_dataset=self.config.testing.eval_dataset)
-        train_dataloader = iter(DataLoader(data, batch_size=self.mini_batch_size, shuffle=False))
-        n_episodes = len(train_dataloader) // self.config.learner.updates
+        datas, order, n_samples, eval_train_dataset, eval_eval_dataset = self.prepare_data(datasets)
+        for data, dataset_name, n_sample in zip(datas, order, n_samples):
+            self.logger.info(f"Observing dataset {dataset_name} for {n_sample} samples. "
+                             f"Evaluation={dataset_name=='evaluation'}")
+            if dataset_name == "evaluation":
+                self.few_shot_testing(train_dataset=eval_train_dataset, eval_dataset=eval_eval_dataset, split="test",
+                                      increment_counters=False)
+            else:
+                train_dataloader = iter(DataLoader(data, batch_size=self.mini_batch_size, shuffle=False))
+                self.episode_samples_seen = 0 # have to keep track of per-task samples seen as we might use replay as well
+                # iterate over episodes
+                while True:
+                    self.set_train()
+                    support_set, task = self.get_support_set(train_dataloader, n_sample)
+                    # TODO: return flag that indicates whether the query set is from the memory. Don't include this in the online accuracy calc
+                    query_set = self.get_query_set(train_dataloader, replay_freq, replay_steps, n_sample)
+                    if support_set is None or query_set is None:
+                        break
 
-        # iterate over episodes
-        while True:
-            self.set_train()
-            support_set = self.get_support_set(train_dataloader)
-            # TODO: return flag that indicates whether the query set is from the memory. Don't include this in the online accuracy calc
-            query_set = self.get_query_set(train_dataloader, replay_freq, replay_steps)
-            if support_set is None or query_set is None:
-                return
+                    self.training_step(support_set, query_set, task=task)
 
-            self.training_step(support_set, query_set)
+                    self.meta_training_log()
+                    self.write_metrics()
+                    self.current_iter += 1
+                    if self.episode_samples_seen >= n_sample:
+                        break
+            if dataset_name == self.config.testing.eval_dataset:
+                self.eval_task_first_encounter = False
 
-            self.log()
-            self.write_metrics()
-            self.current_iter += 1
-
-    def training_step(self, support_set, query_set=None):
+    def training_step(self, support_set, query_set=None, task=None):
         self.inner_optimizer.zero_grad()
         with higher.innerloop_ctx(self.pn, self.inner_optimizer,
                                 copy_initial_weights=False,
@@ -89,11 +97,16 @@ class ANML(Learner):
 
                 predictions = model_utils.make_prediction(output["logits"].detach())
                 self.update_support_tracker(loss, predictions, labels)
-                online_metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
-                self.metrics["online"].append({
-                    "accuracy": online_metrics["accuracy"],
+                metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
+                online_metrics = {
+                    "accuracy": metrics["accuracy"],
                     "examples_seen": self.examples_seen(),
-                })
+                    "task": task if task is not None else "none"
+                }
+                self.metrics["online"].append(online_metrics)
+                if task is not None and task == self.config.testing.eval_dataset and \
+                    self.eval_task_first_encounter:
+                    self.metrics["eval_task_first_encounter"].append(online_metrics)
                 self._examples_seen += len(text)
 
             # Outer loop
@@ -107,11 +120,16 @@ class ANML(Learner):
 
                     predictions = model_utils.make_prediction(output["logits"].detach())
                     self.update_query_tracker(loss, predictions, labels)
-                    online_metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
-                    self.metrics["online"].append({
-                        "accuracy": online_metrics["accuracy"],
+                    metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
+                    online_metrics = {
+                        "accuracy": metrics["accuracy"],
                         "examples_seen": self.examples_seen(),
-                    })
+                        "task": task if task is not None else "none"
+                    }
+                    self.metrics["online"].append(online_metrics)
+                    if task is not None and task == self.config.testing.eval_dataset and \
+                        self.eval_task_first_encounter:
+                        self.metrics["eval_task_first_encounter"].append(online_metrics)
                     self._examples_seen += len(text)
 
                 # Meta optimizer step
@@ -176,39 +194,7 @@ class ANML(Learner):
             "query_labels": []
         }
 
-    def log(self):
-        support_loss = np.mean(self.tracker["support_loss"])
-        query_loss = np.mean(self.tracker["query_loss"])
-        support_metrics = model_utils.calculate_metrics(self.tracker["support_predictions"], self.tracker["support_labels"])
-        query_metrics = model_utils.calculate_metrics(self.tracker["query_predictions"], self.tracker["query_labels"])
-
-        self.logger.info(
-            f"Episode {self.current_iter + 1} Support set: Loss = {support_loss:.4f}, "
-            f"accuracy = {support_metrics['accuracy']:.4f}, precision = {support_metrics['precision']:.4f}, "
-            f"recall = {support_metrics['recall']:.4f}, F1 score = {support_metrics['f1']:.4f}"
-        )
-        self.logger.info(
-            f"Episode {self.current_iter + 1} Query set: Loss = {query_loss:.4f}, "
-            f"accuracy = {query_metrics['accuracy']:.4f}, precision = {query_metrics['precision']:.4f}, "
-            f"recall = {query_metrics['recall']:.4f}, F1 score = {query_metrics['f1']:.4f}"
-        )
-        if self.config.wandb:
-            wandb.log({
-                "support_accuracy": support_metrics['accuracy'],
-                "support_precision": support_metrics['precision'],
-                "support_recall": support_metrics['recall'],
-                "support_f1": support_metrics['f1'],
-                "support_loss": support_loss,
-                "query_accuracy": query_metrics['accuracy'],
-                "query_precision": query_metrics['precision'],
-                "query_recall": query_metrics['recall'],
-                "query_f1": query_metrics['f1'],
-                "query_loss": query_loss,
-                "examples_seen": self.examples_seen()
-            })
-        self.reset_tracker()
-
-    def evaluate(self, dataloader):
+    def evaluate(self, dataloader, prediction_network=None):
         if self.config.learner.evaluation_support_set:
             support_set = []
             for _ in range(self.config.learner.updates):
@@ -220,7 +206,7 @@ class ANML(Learner):
                                 track_higher_grads=False) as (fpn, diffopt):
             if self.config.learner.evaluation_support_set:
                 self.set_train()
-                prediction_network = fpn
+                support_prediction_network = fpn
                 # Inner loop
                 task_predictions, task_labels = [], []
                 support_loss = []
@@ -241,7 +227,9 @@ class ANML(Learner):
                             results["precision"], results["recall"], results["f1"]))
                 self.set_eval()
             else:
-                prediction_network = self.pn
+                support_prediction_network = self.pn
+            if prediction_network is None:
+                prediction_network = support_prediction_network
 
             self.set_eval()
             all_losses, all_predictions, all_labels = [], [], []
@@ -259,7 +247,7 @@ class ANML(Learner):
                 #     self.logger.info(f"Batch {i + 1}/{len(dataloader)} processed")
 
         results = model_utils.calculate_metrics(all_predictions, all_labels)
-        self.logger.info("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
+        self.logger.debug("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
                     "F1 score = {:.4f}".format(np.mean(all_losses), results["accuracy"],
                     results["precision"], results["recall"], results["f1"]))
         return results
@@ -286,39 +274,6 @@ class ANML(Learner):
     def load_other_state_information(self, checkpoint):
         self.memory = checkpoint["memory"]
 
-    def get_support_set(self, data_iterator):
-        """Return a list of datapoints, and return None if the end of the data is reached."""
-        support_set = []
-        for _ in range(self.config.learner.updates):
-            try:
-                text, labels, _ = next(data_iterator)
-                support_set.append((text, labels))
-            except StopIteration:
-                self.logger.info("Terminating training as all the data is seen")
-                return None
-        return support_set
-
-    def get_query_set(self, data_iterator, replay_freq, replay_steps):
-        """Return a list of datapoints, and return None if the end of the data is reached."""
-        query_set = []
-        if self.replay_rate != 0 and (self.current_iter + 1) % replay_freq == 0:
-            # now we replay from memory
-            self.logger.debug("query set read from memory")
-            for _ in range(replay_steps):
-                text, labels = self.memory.read_batch(batch_size=self.mini_batch_size)
-                query_set.append((text, labels))
-        else:
-            # otherwise simply use next batch from data stream as query set
-            try:
-                text, labels, _ = next(data_iterator)
-                query_set.append((text, labels))
-                self.memory.write_batch(text, labels)
-                self._examples_seen += self.mini_batch_size
-            except StopIteration:
-                self.logger.info("Terminating training as all the data is seen")
-                return None
-        return query_set
-
     def set_eval(self):
         self.nm.eval()
         self.pn.eval()
@@ -327,7 +282,7 @@ class ANML(Learner):
         self.nm.train()
         self.pn.train()
 
-    def few_shot_testing(self, datasets):
+    def few_shot_testing(self, train_dataset, eval_dataset, increment_counters=False, split="test"):
         """
         Allow the model to train on a small amount of datapoints at a time. After every training step,
         evaluate on many samples that haven't been seen yet.
@@ -336,70 +291,34 @@ class ANML(Learner):
 
         Parameters
         ---
-        datasets: Dict[str, Dataset]
-            Maps a dataset name to its corresponding dataset object. Should not contain training data.
+        train_dataset: Dataset
+            Contains examples on which the model is trained before being evaluated
+        eval_dataset: Dataset
+            Contains examples on which the model is evaluated
+        increment_counters: bool
+            If True, update online metrics and current iteration counters.
         """
-        all_predictions, all_labels = [], []
-        # TODO: evaluate on all datasets instead of just one.
-        dataset = datasets[self.config.testing.eval_dataset]
-
         self.logger.info(f"few shot testing on dataset {self.config.testing.eval_dataset} "
-                         f"with {self.config.testing.n_samples} samples")
-
-        # split into training and testing point, assumes there is no meaningful difference in dataset order
-        train_dataset = dataset.new(0, self.config.testing.n_samples)
-        test_dataset = dataset.new(self.config.testing.n_samples, -1)
-        # sample a subset so validation doesn't take too long
-        test_dataset = test_dataset.sample(min(self.config.testing.few_shot_validation_size, len(test_dataset)))
-        self.logger.info(f"Validating with test set of size {len(test_dataset)}")
-        train_dataloader = DataLoader(train_dataset, batch_size=self.config.testing.few_shot_batch_size, shuffle=False)
-        test_dataloader = DataLoader(test_dataset, batch_size=self.mini_batch_size, shuffle=False)
-
+                         f"with {len(train_dataset)} samples")
+        train_dataloader, eval_dataloader = self.few_shot_preparation(train_dataset, eval_dataset, split=split)
         all_predictions, all_labels = [], []
+        with higher.innerloop_ctx(self.pn, self.inner_optimizer,
+                                copy_initial_weights=False,
+                                track_higher_grads=False) as (fpn, diffopt):
+            self.pn.train()
+            # Inner loop
+            for i, (text, labels, datasets) in enumerate(train_dataloader):
+                labels = torch.tensor(labels).to(self.device)
+                output = self.forward(text, labels, fpn)
+                loss = self.loss_fn(output["logits"], labels)
+                diffopt.step(loss)
 
-        zero_shot = {
-            # zero shot accuracy
-            "examples_seen": 0,
-            "accuracy": self.evaluate(dataloader=test_dataloader)["accuracy"],
-            "task": self.config.testing.eval_dataset
-        }
-        if self.config.wandb:
-            wandb.log({
-                "few_shot_accuracy": zero_shot["accuracy"],
-                "examples_seen": 0
-            })
-        self.metrics["evaluation"]["few_shot"] = [zero_shot]
-        self.metrics["evaluation"]["few_shot_training"] = []
-
-        # Inner loop
-        for i, (text, labels, datasets) in enumerate(train_dataloader):
-            labels = torch.tensor(labels).to(self.device)
-            # labels = labels.to(self.device)
-            output = self.forward(text, labels, self.pn)
-            loss = self.loss_fn(output["logits"], labels)
-            self.inner_optimizer.zero_grad()
-            loss.backward()
-            self.inner_optimizer.step()
-
-            predictions = model_utils.make_prediction(output["logits"].detach())
-
-            all_predictions.extend(predictions.tolist())
-            all_labels.extend(labels.tolist())
-            online_metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
-            dataset_results = self.evaluate(dataloader=test_dataloader)
-
-            train_results = {
-                "examples_seen": i * self.config.testing.few_shot_batch_size,
-                "accuracy": online_metrics["accuracy"],
-                "task": datasets[0]  # assume whole batch is from same task
-            }
-            test_results = {
-                "examples_seen": (i + 1) * self.config.testing.few_shot_batch_size,
-                "accuracy": dataset_results["accuracy"],
-                "task": datasets[0]
-            }
-            self.metrics["evaluation"]["few_shot_training"].append(train_results)
-            self.metrics["evaluation"]["few_shot"].append(test_results)
-            if self.config.wandb:
-                wandb.log(train_results)
-                wandb.log(test_results)
+                predictions = model_utils.make_prediction(output["logits"].detach())
+                all_predictions.extend(predictions.tolist())
+                all_labels.extend(labels.tolist())
+                dataset_results = self.evaluate(dataloader=eval_dataloader, prediction_network=fpn)
+                self.log_few_shot(all_predictions, all_labels, datasets, dataset_results,
+                                  increment_counters, text, i, split=split)
+                if (i * self.config.testing.few_shot_batch_size) % self.mini_batch_size == 0 and i > 0:
+                    all_predictions, all_labels = [], []
+        self.few_shot_counter += 1
