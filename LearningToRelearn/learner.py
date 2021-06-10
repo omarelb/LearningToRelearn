@@ -26,9 +26,8 @@ from omegaconf import DictConfig, open_dict
 import wandb
 
 import LearningToRelearn.models.utils as model_utils
-from LearningToRelearn.datasets.text_classification_dataset import get_datasets, ClassificationDataset,\
-                                                                   datasets_dict
-from LearningToRelearn.datasets.utils import batch_encode
+from LearningToRelearn.datasets.text_classification_dataset import SAMPLE_SEED, alternating_order, get_continuum, get_datasets, ClassificationDataset,\
+                                                                   datasets_dict, n_samples_order
 
 # plt.style.use("seaborn-paper")
 CHECKPOINTS = Path("model-checkpoints/")
@@ -117,7 +116,7 @@ class Learner:
         #     self.logger.info(f"Checkpoint for {self.exp_dir.name} ALREADY EXISTS. Continuing training.")
 
         self.logger.info(f"Setting seed: {self.config.seed}")
-        np.random.seed(self.config.seed)
+        np.random.seed(SAMPLE_SEED) # numpy only used for sampling data, which needs to stay equal over different runs
         random.seed(self.config.seed)
         torch.manual_seed(self.config.seed)
         torch.backends.cudnn.deterministic = True
@@ -362,7 +361,7 @@ class Learner:
         if self.config.wandb:
             # replace with new name
             test_results = test_results.copy()
-            test_results[f"few_shot_test_accuracy_{self.few_shot_counter}"] = test_results.pop("accuracy")
+            test_results[f"few_shot_{split}_accuracy_{self.few_shot_counter}"] = test_results.pop("accuracy")
             wandb.log(test_results)
 
     def reset_tracker(self):
@@ -391,6 +390,114 @@ class Learner:
             replay_freq = 0
             replay_steps = 0
         return replay_freq, replay_steps
+
+    def prepare_data(self, datasets):
+        """Deal with making data ready for consumption.
+        
+        Parameters
+        ---
+        datasets: Dict[str, List of dataset names]
+
+        Returns:
+            tuple:
+
+        """
+        # train_datasets = {dataset_name: dataset for dataset_name, dataset in zip(datasets["order"], datasets["train"])}
+        train_datasets = datasets_dict(datasets["train"], datasets["order"])
+        val_datasets = datasets_dict(datasets["test"], datasets["order"])
+        eval_dataset = val_datasets[self.config.testing.eval_dataset]
+        if self.config.testing.few_shot:
+            # split into training and testing point, assumes there is no meaningful difference in dataset order
+            eval_train_dataset = eval_dataset.new(0, self.config.testing.n_samples)
+            eval_eval_dataset = eval_dataset.new(self.config.testing.n_samples, -1)
+            # sample a subset so validation doesn't take too long
+            eval_eval_dataset = eval_eval_dataset.sample(min(self.config.testing.few_shot_validation_size, len(eval_dataset)))
+
+        if self.config.data.alternating_order:
+            order, n_samples = alternating_order(train_datasets, tasks=self.config.data.alternating_tasks,
+                                                 n_samples_per_switch=self.config.data.alternating_n_samples_per_switch,
+                                                 relative_frequencies=self.config.data.alternating_relative_frequencies)
+        else:
+            n_samples, order = n_samples_order(self.config.learner.samples_per_task, self.config.task_order, datasets["order"])
+        datas = get_continuum(train_datasets, order=order, n_samples=n_samples,
+                             eval_dataset=self.config.testing.eval_dataset, merge=False)
+        return datas, order, n_samples, eval_train_dataset, eval_eval_dataset
+
+    def get_support_set(self, data_iterator, max_sample):
+        """Return a list of datapoints, and return None if the end of the data is reached.
+        
+        max_sample indicates the maximum amount of samples able to be drawn within one task observation.
+        If it is reached, don't add more samples."""
+        support_set = []
+        for _ in range(self.config.learner.updates):
+            try:
+                text, labels, datasets = next(data_iterator)
+                support_set.append((text, labels))
+                self.episode_samples_seen += len(text)
+            except StopIteration:
+                # self.logger.info("Terminating training as all the data is seen")
+                return None, None
+            if self.episode_samples_seen >= max_sample:
+                break
+        return support_set, datasets[0]
+
+    def get_query_set(self, data_iterator, replay_freq, replay_steps, max_sample):
+        """Return a list of datapoints, and return None if the end of the data is reached."""
+        query_set = []
+        if self.replay_rate != 0 and (self.current_iter + 1) % replay_freq == 0:
+            # now we replay from memory
+            self.logger.debug("query set read from memory")
+            for _ in range(replay_steps):
+                text, labels = self.memory.read_batch(batch_size=self.mini_batch_size)
+                query_set.append((text, labels))
+                self.episode_samples_seen += len(text)
+                self.metrics["replay_samples_seen"] += len(text)
+                if self.episode_samples_seen >= max_sample:
+                    break
+        else:
+            # otherwise simply use next batch from data stream as query set
+            try:
+                text, labels, _ = next(data_iterator)
+                query_set.append((text, labels))
+                self.memory.write_batch(text, labels)
+                self.episode_samples_seen += len(text)
+            except StopIteration:
+                # self.logger.info("Terminating training as all the data is seen")
+                return None
+        return query_set
+
+    def meta_training_log(self):
+        """Logs data during training for meta learners."""
+        support_loss = np.mean(self.tracker["support_loss"])
+        query_loss = np.mean(self.tracker["query_loss"])
+        support_metrics = model_utils.calculate_metrics(self.tracker["support_predictions"], self.tracker["support_labels"])
+        query_metrics = model_utils.calculate_metrics(self.tracker["query_predictions"], self.tracker["query_labels"])
+
+        self.logger.debug(
+            f"Episode {self.current_iter + 1} Support set: Loss = {support_loss:.4f}, "
+            f"accuracy = {support_metrics['accuracy']:.4f}, precision = {support_metrics['precision']:.4f}, "
+            f"recall = {support_metrics['recall']:.4f}, F1 score = {support_metrics['f1']:.4f}"
+        )
+        self.logger.debug(
+            f"Episode {self.current_iter + 1} Query set: Loss = {query_loss:.4f}, "
+            f"accuracy = {query_metrics['accuracy']:.4f}, precision = {query_metrics['precision']:.4f}, "
+            f"recall = {query_metrics['recall']:.4f}, F1 score = {query_metrics['f1']:.4f}"
+        )
+        if self.config.wandb:
+            wandb.log({
+                "support_accuracy": support_metrics['accuracy'],
+                "support_precision": support_metrics['precision'],
+                "support_recall": support_metrics['recall'],
+                "support_f1": support_metrics['f1'],
+                "support_loss": support_loss,
+                "query_accuracy": query_metrics['accuracy'],
+                "query_precision": query_metrics['precision'],
+                "query_recall": query_metrics['recall'],
+                "query_f1": query_metrics['f1'],
+                "query_loss": query_loss,
+                "examples_seen": self.examples_seen()
+            })
+        self.reset_tracker()
 
     def save_checkpoint(self, file_name: str = None, save_optimizer_state=None, delete_previous=False):
         """Save checkpoint in the checkpoint directory.
