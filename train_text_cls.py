@@ -17,6 +17,7 @@ import wandb
 # command line management
 from dataclasses import dataclass, field
 import hydra
+from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 
 from LearningToRelearn.datasets.text_classification_dataset import get_datasets
@@ -87,10 +88,16 @@ def main(config):
             learner.save_checkpoint()
     else:
         # no training, just evaluate
+        logger.info(f"Evaluating {config.evaluate}..")
         experiment_path = Path(hydra.utils.to_absolute_path(EXPERIMENT_DIR / config.evaluate))
         config_file = experiment_path / '.hydra' / 'config.yaml'
+        overrides = HydraConfig.get().overrides.task
         config = OmegaConf.load(config_file)
         config.wandb = False
+        config.evaluate = True
+        config.testing.n_samples_before_average_evaluate = 80
+        config.testing.few_shot = False
+
         learner = get_learner(config, experiment_path=experiment_path)
         learner.load_checkpoint()
         datasets = get_datasets(learner.data_dir, config.data.order, debug=config.debug_data)
