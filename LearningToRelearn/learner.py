@@ -37,6 +37,7 @@ EXPERIMENT_DIR = Path("experiments")
 EXPERIMENT_IDS = Path(hydra.utils.to_absolute_path("experiment_ids.csv"))
 METRICS_FILE = "metrics.json"
 BEST_MODEL_FNAME = "best-model.pt"
+TEMP_CHECKPOINT = "temp_checkpoint.pt"
 
 
 class Learner:
@@ -49,15 +50,17 @@ class Learner:
     All the parameters that drive the experiment behaviour are specified in a config dictionary.
     """
 
-    def __init__(self, config, experiment_path=None):
+    def __init__(self, config, experiment_path=None, test=False):
         """Instantiate a trainer for autopunctuation models.
 
         Parameters
         ----------
         config:
             dict of parameters that drive the training behaviour.
-        experiment_dir:
+        experiment_path:
             path to experiment directory if it already exists
+        test: bool
+            If True, don't create side effects such as experiment directory
         """
         self.config = config
         self.logger = logging.getLogger(__name__)
@@ -67,42 +70,42 @@ class Learner:
             experiment_path = os.getcwd()  # hydra changes the runtime to the experiment folder
         # Experiment output directory
         self.exp_dir = Path(experiment_path)
+        if not test:
+            # weights and biases
+            if config.wandb:
+                with open_dict(config):
+                    config["exp_dir"] = self.exp_dir.as_posix()
+                if config.name is None:
+                    config.name = "unnamed"
+                experiment_id = update_experiment_ids(config)
+                while True:
+                    try:
+                        self.wandb_run = wandb.init(project="relearning", config=flatten_dict(config),
+                                name=f"{experiment_id['name']}-{experiment_id['id']}", reinit=True)
+                        break
+                    except Exception as e:
+                        self.logger.info("wandb initialization failed. Retrying..")
+                        time.sleep(10)
 
-        # weights and biases
-        if config.wandb:
-            with open_dict(config):
-                config["exp_dir"] = self.exp_dir.as_posix()
-            if config.name is None:
-                config.name = "unnamed"
-            experiment_id = update_experiment_ids(config)
-            while True:
-                try:
-                    self.wandb_run = wandb.init(project="relearning", config=flatten_dict(config),
-                               name=f"{experiment_id['name']}-{experiment_id['id']}", reinit=True)
-                    break
-                except Exception as e:
-                    self.logger.info("wandb initialization failed. Retrying..")
-                    time.sleep(10)
+            # Checkpoint directory to save models
+            self.checkpoint_dir = self.exp_dir / CHECKPOINTS
+            self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            checkpoint_exists = len(list(self.checkpoint_dir.glob("*"))) > 0
 
-        # Checkpoint directory to save models
-        self.checkpoint_dir = self.exp_dir / CHECKPOINTS
-        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        checkpoint_exists = len(list(self.checkpoint_dir.glob("*"))) > 0
+            # data directory using original working directory
+            self.data_dir = hydra.utils.to_absolute_path("data")
 
-        # data directory using original working directory
-        self.data_dir = hydra.utils.to_absolute_path("data")
+            # Tensorboard log directory
+            self.log_dir = self.exp_dir / LOGS
+            self.log_dir.mkdir(parents=True, exist_ok=True)
 
-        # Tensorboard log directory
-        self.log_dir = self.exp_dir / LOGS
-        self.log_dir.mkdir(parents=True, exist_ok=True)
-
-        # Test and evaluation results saved here
-        self.results_dir = self.exp_dir / RESULTS_DIR
-        if (self.results_dir / "results.json").is_file() and not "evaluate" in self.config and not self.config.name == "test":
-            raise Exception(f"This experiment directory, {self.exp_dir}, already exists. Use a different experiment name "
-                            "or different seed. If evaluating, specify the evaluate flag when running the program."
-            )
-        self.results_dir.mkdir(parents=True, exist_ok=True)
+            # Test and evaluation results saved here
+            self.results_dir = self.exp_dir / RESULTS_DIR
+            if (self.results_dir / "results.json").is_file() and not "evaluate" in self.config and not self.config.name == "test":
+                raise Exception(f"This experiment directory, {self.exp_dir}, already exists. Use a different experiment name "
+                                "or different seed. If evaluating, specify the evaluate flag when running the program."
+                )
+            self.results_dir.mkdir(parents=True, exist_ok=True)
 
         if config.debug_logging:
             self.logger.setLevel(logging.DEBUG)
@@ -135,6 +138,7 @@ class Learner:
         self.log_freq = config.training.log_freq
         self.validate_freq = config.training.validate_freq
         self.type = config.learner.type
+        self.is_metalearner = self.type in ("maml", "oml", "anml")
 
         # replay attributes
         self.write_prob = config.learner.write_prob
@@ -155,6 +159,10 @@ class Learner:
         self.eval_task_first_encounter = True
         self.metrics["eval_task_first_encounter"] = []
         self.metrics["replay_samples_seen"] = 0
+        # during evaluation this might happen
+        if not test:
+            if (self.results_dir / METRICS_FILE).is_file():
+                self.read_metrics()
         # keeps track of how many times we have performed few shot testing, for logging purposes
         self.few_shot_counter = 0
         self.reset_tracker()
@@ -217,7 +225,7 @@ class Learner:
             self.set_eval()
 
             if self.config.testing.average_accuracy:
-                self.logger.info("getting average accuracy")
+                self.logger.info("Getting average accuracy")
                 self.average_accuracy(eval_datasets, split=split, train_datasets=train_datasets)
 
             if self.config.testing.few_shot:
@@ -234,39 +242,72 @@ class Learner:
         results = {}
         accuracies, precisions, recalls, f1s = [], [], [], []
 
-        # if train_datasets is not None and self.config.testing.n_samples_before_average_evaluate > 0:
-        #     train_dataloader = DataLoader(ConcatDataset(train_datasets.values()), shuffle=True)
-        #     # TODO: finish this
-        for dataset_name, dataset in datasets.items():
-            self.logger.info("Testing on {}".format(dataset_name))
-            if self.config.testing.average_validation_size is not None:
-                dataset = dataset.sample(min(len(dataset), self.config.testing.average_validation_size))
-            test_dataloader = DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False)
-            dataset_results = self.evaluate(dataloader=test_dataloader)
-            accuracies.append(dataset_results["accuracy"])
-            precisions.append(dataset_results["precision"])
-            recalls.append(dataset_results["recall"])
-            f1s.append(dataset_results["f1"])
-            results[dataset_name] = dataset_results
-
-        mean_results = {
-            "accuracy": np.mean(accuracies),
-            "precision": np.mean(precisions),
-            "recall": np.mean(recalls),
-            "f1": np.mean(f1s)
-        }
-        self.logger.info("Overall test metrics: Accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
-                    "F1 score = {:.4f}".format(
-                        mean_results["accuracy"], mean_results["precision"], mean_results["recall"],
-                        mean_results["f1"]
-                    ))
+        self.save_checkpoint(file_name=TEMP_CHECKPOINT, save_optimizer_state=True, delete_previous=False)
+        if self.config.testing.n_samples_before_average_evaluate is None:
+            self.config.testing.n_samples_before_average_evaluate = 80
+        training_amounts = (0, self.config.testing.n_samples_before_average_evaluate)
         metrics_name = split + "_evaluation"
-        self.metrics[metrics_name]["individual"] = results
-        self.metrics[metrics_name]["average"] = mean_results
-        if self.config.wandb:
-            wandb.log({
-                split + "_testing_average_accuracy": mean_results["accuracy"]
-            })
+        for training_amount in training_amounts:
+            metrics_key_average = "average" + f"_{training_amount}" * (training_amount > 0)
+            # this has already been evaluated, no need to do it again
+            # if metrics_key_average in self.metrics[metrics_name]:
+            #     continue
+        # Before evaluating average accuracy, allow model to see n examples again
+            if train_datasets is not None and training_amount > 0:
+                train_dataloader = iter(DataLoader(ConcatDataset(train_datasets.values()), shuffle=True,
+                                            batch_size=self.mini_batch_size))
+                n_batches = max(training_amount // self.mini_batch_size, 1)
+                self.metrics["n_samples_before_average_evaluate"] = n_batches * self.mini_batch_size
+                self.logger.info(f"Before evaluating average accuracy, train on {n_batches * self.mini_batch_size}"
+                                " samples from all datasets.")
+                if self.is_metalearner:
+                    support_set, _ = self.get_support_set(train_dataloader, n_updates=n_batches)
+                    self.inner_optimizer.zero_grad()
+                    for text, labels in support_set:
+                        labels = torch.tensor(labels).to(self.device)
+                        # labels = labels.to(self.device)
+                        output = self.forward(text, labels)
+                        loss = self.loss_fn(output["logits"], labels)
+                        loss.backward()
+                        self.inner_optimizer.step()
+                    self.training_step(support_set)
+                else:
+                    for _ in range(n_batches):
+                        text, labels, _ = next(train_dataloader)
+                        self.training_step(text, labels)
+            for dataset_name, dataset in datasets.items():
+                self.logger.info("Testing on {}".format(dataset_name))
+                if self.config.testing.average_validation_size is not None:
+                    dataset = dataset.sample(min(len(dataset), self.config.testing.average_validation_size))
+                test_dataloader = DataLoader(dataset, batch_size=self.mini_batch_size, shuffle=False)
+                dataset_results = self.evaluate(dataloader=test_dataloader)
+                accuracies.append(dataset_results["accuracy"])
+                precisions.append(dataset_results["precision"])
+                recalls.append(dataset_results["recall"])
+                f1s.append(dataset_results["f1"])
+                results[dataset_name] = dataset_results
+
+            mean_results = {
+                "accuracy": np.mean(accuracies),
+                "precision": np.mean(precisions),
+                "recall": np.mean(recalls),
+                "f1": np.mean(f1s)
+            }
+            self.logger.info("Overall test metrics: Accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
+                        "F1 score = {:.4f}".format(
+                            mean_results["accuracy"], mean_results["precision"], mean_results["recall"],
+                            mean_results["f1"]
+                        ))
+            self.metrics[metrics_name]["individual" + f"_{training_amount}" * (training_amount > 0)] = results
+            self.metrics[metrics_name][metrics_key_average] = mean_results
+            if self.config.wandb:
+                wandb.log({
+                    split + "_testing_average_accuracy" + f"_{training_amount}" * (training_amount > 0): mean_results["accuracy"]
+                })
+            if train_datasets is not None and self.config.testing.n_samples_before_average_evaluate > 0:
+                self.load_checkpoint(TEMP_CHECKPOINT, load_optimizer_state=True)
+                # delete temp checkpoint
+                (self.checkpoint_dir / TEMP_CHECKPOINT).unlink()
 
     def few_shot_testing(self, train_dataset, eval_dataset, increment_counters=False, split="test"):
         """
@@ -289,8 +330,6 @@ class Learner:
         self.logger.info(f"few shot testing on dataset {self.config.testing.eval_dataset} "
                          f"with {len(train_dataset)} samples")
         # whenever we do few shot evaluation, we reset the learning to before the evaluation started
-        temp_checkpoint = "few_shot_temp_checkpoint.pt"
-        self.save_checkpoint(file_name=temp_checkpoint, save_optimizer_state=True, delete_previous=False)
         train_dataloader, eval_dataloader = self.few_shot_preparation(train_dataset, eval_dataset, split=split)
         all_predictions, all_labels = [], []
 
@@ -305,14 +344,12 @@ class Learner:
                               text, i, split=split)
             if (i * self.config.testing.few_shot_batch_size) % self.mini_batch_size == 0 and i > 0:
                 all_predictions, all_labels = [], []
-        self.load_checkpoint(temp_checkpoint, load_optimizer_state=True)
-        # delete temp checkpoint
-        (self.checkpoint_dir / temp_checkpoint).unlink()
-        self.few_shot_counter += 1
+        self.few_shot_end()
 
     def few_shot_preparation(self, train_dataset, eval_dataset, split="test"):
         """Few shot preparation code that isn't specific to any learner"""
         self.logger.info(f"Few shot evaluation number {self.few_shot_counter}")
+        self.save_checkpoint(file_name=TEMP_CHECKPOINT, save_optimizer_state=True, delete_previous=False)
         metrics_entry = split + "_evaluation"
         if "few_shot" not in self.metrics[metrics_entry]:
             self.metrics[metrics_entry]["few_shot"] = []
@@ -328,6 +365,12 @@ class Learner:
         self.logger.info(f"Length of few shot metrics {len(self.metrics[metrics_entry]['few_shot'])}")
         
         return train_dataloader, eval_dataloader
+
+    def few_shot_end(self):
+        self.load_checkpoint(TEMP_CHECKPOINT, load_optimizer_state=True)
+        # delete temp checkpoint
+        (self.checkpoint_dir / TEMP_CHECKPOINT).unlink()
+        self.few_shot_counter += 1
 
     def log_few_shot(self, all_predictions, all_labels, datasets, dataset_results, increment_counters, text,
                      few_shot_batch, split="test"):
@@ -423,25 +466,32 @@ class Learner:
                              eval_dataset=self.config.testing.eval_dataset, merge=False)
         return datas, order, n_samples, eval_train_dataset, eval_eval_dataset
 
-    def get_support_set(self, data_iterator, max_sample):
-        """Return a list of datapoints, and return None if the end of the data is reached.
+    def get_support_set(self, data_iterator, max_sample=None, n_updates=None):
+        """Return a list of batches of datapoints, and return None if the end of the data is reached.
         
         max_sample indicates the maximum amount of samples able to be drawn within one task observation.
-        If it is reached, don't add more samples."""
+        If it is reached, don't add more samples.
+        """
+        updates = self.config.learner.updates
+        if n_updates is not None and n_updates > 0:
+            updates = n_updates
         support_set = []
-        for _ in range(self.config.learner.updates):
+        for _ in range(updates):
             try:
                 text, labels, datasets = next(data_iterator)
                 support_set.append((text, labels))
-                self.episode_samples_seen += len(text)
+                try:
+                    self.episode_samples_seen += len(text)
+                except AttributeError as e:
+                    continue
             except StopIteration:
                 # self.logger.info("Terminating training as all the data is seen")
                 return None, None
-            if self.episode_samples_seen >= max_sample:
+            if max_sample is not None and self.episode_samples_seen >= max_sample:
                 break
         return support_set, datasets[0]
 
-    def get_query_set(self, data_iterator, replay_freq, replay_steps, max_sample):
+    def get_query_set(self, data_iterator, replay_freq, replay_steps, max_sample, write_memory=True):
         """Return a list of datapoints, and return None if the end of the data is reached."""
         query_set = []
         if self.replay_rate != 0 and (self.current_iter + 1) % replay_freq == 0:
@@ -459,7 +509,8 @@ class Learner:
             try:
                 text, labels, _ = next(data_iterator)
                 query_set.append((text, labels))
-                self.memory.write_batch(text, labels)
+                if write_memory:
+                    self.memory.write_batch(text, labels)
                 self.episode_samples_seen += len(text)
             except StopIteration:
                 # self.logger.info("Terminating training as all the data is seen")
@@ -523,7 +574,7 @@ class Learner:
             state["optimizer"] = self.optimizer_state()
         state = self.save_other_state_information(state)
         # delete previous checkpoint to avoid hogging space
-        if delete_previous or self.config.delete_previous_checkpoint:
+        if delete_previous and self.config.delete_previous_checkpoint:
             previous_checkpoint = self.get_last_checkpoint_path()
             if previous_checkpoint is not None and previous_checkpoint.is_file():
                 previous_checkpoint.unlink()
@@ -621,6 +672,13 @@ class Learner:
     def write_metrics(self):
         with open(self.results_dir / METRICS_FILE, "w") as f:
             json.dump(self.metrics, f)
+
+    def read_metrics(self):
+        try:
+            with open(self.results_dir / METRICS_FILE) as f:
+                self.metrics = json.load(f)
+        except Exception as e:
+            print(e)
 
     def set_train(self):
         """Set underlying pytorch network to train mode.
