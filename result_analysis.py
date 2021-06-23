@@ -159,11 +159,11 @@ def collect_results(metrics):
         split += "_" * (len(split) > 0)
         evaluation = split + "evaluation"
         if evaluation in metrics:
-            if "average" in metrics[evaluation]:
-                results[split + "average_accuracy"] = metrics[evaluation]["average"]["accuracy"]
-            # accuracy over individual evaluation datasets
-            if "individual" in metrics[evaluation]:
-                results[split + "individual_accuracy"] = metrics[evaluation]["individual"]
+            for key in metrics[evaluation].keys():
+                if key.startswith("average"):
+                    results[split + key + "_accuracy"] = metrics[evaluation][key]["accuracy"]
+                if key.startswith("individual"):
+                    results[split + key + "_accuracy"] = metrics[evaluation][key]
             if "few_shot" in metrics[evaluation]:
                 # results["eval_task"] = metrics["evaluation"]["few_shot"][0][0]["task"]
                 for i, few_shot_metrics in enumerate(metrics[evaluation]["few_shot"]):
