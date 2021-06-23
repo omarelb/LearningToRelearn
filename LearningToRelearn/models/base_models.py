@@ -144,14 +144,16 @@ class MemoryStore:
     """
     Memory component.
     """
-    def __init__(self, memory_size, key_dim, relevance_discount=0.99, delete_method="age", device="cpu"):
+    def __init__(self, memory_size, key_dim, relevance_discount=0.99, delete_method="age",
+                 device="cpu", initialize=True):
         self.memory_size = memory_size
         self.key_dim = key_dim
         self.device = device
         self.relevance_discount = relevance_discount
         self.delete_method = delete_method
 
-        self.initialize()
+        if initialize:
+            self.initialize()
 
     def query(self, query, n_neighbours):
         """Query memory given an input embedding"""
@@ -238,7 +240,10 @@ class MemoryStore:
         self.added_memories += n_added
 
     def update_ixs(self, ixs, embeddings, labels, query_result=None, global_update=True):
-        """Update specific memory slots"""
+        """Update specific memory slots
+        
+        If query_result is not supplied, relevance scores are not updated.
+        """
         self.memory_embeddings[ixs] = embeddings
         self.memory_labels[ixs] = labels
         self.memory_age[ixs] = 0
@@ -265,7 +270,155 @@ class MemoryStore:
         self.memory_labels = -1 * torch.ones((self.memory_size,), dtype=torch.long).to(self.device)
         self.memory_age = -1 * torch.ones((self.memory_size,), dtype=torch.long).to(self.device)
         self.memory_relevance = torch.zeros((self.memory_size,), dtype=torch.long).to(self.device)
+
+        self.write_pointer = -1
+        self.added_memories = 0
+
+    def __len__(self):
+        return min(self.memory_size, self.added_memories)
+
+class ClassMemoryStore(MemoryStore):
+    """
+    Memory component for class representations.
+    """
+    def __init__(self, memory_size, key_dim, relevance_discount=0.99, delete_method="age",
+                 n_classes=None, discount_method="mean", class_discount=0.99, device="cpu"):
+        super().__init__(memory_size, key_dim, relevance_discount, delete_method, device, initialize=False)
+        self.n_classes = n_classes
+        self.class_discount_method = discount_method
+        self.class_discount = class_discount
+        self.device = device
+        self.relevance_discount = relevance_discount
+        self.delete_method = delete_method
+
+        self.initialize()
+
+    def query(self, query, n_neighbours):
+        """Query memory given an input embedding"""
+        if self.added_memories == 0:
+            return None
+        # TODO: possibly L2-normalize query vector?
+        # allow single queries as well, not only batches
+        if query.dim() == 1:
+            query.unsqueeze_(0)
+        idx, distances = self.get_nearest_entries_ixs(query, n_neighbours)
+        return {
+            "embedding": self.memory_embeddings[idx],
+            "label": self.memory_labels[idx],
+            "age": self.memory_age[idx],
+            "relevance": self.memory_relevance[idx],
+            "ix": idx
+        }
+    
+    def get_nearest_entries_ixs(self, queries, n_neighbours):
+        """
+        Reference code for pairwise distance computation:
+        https://discuss.pytorch.org/t/efficient-distance-matrix-computation/9065/3
+        Args:
+            queries: a torch array with (n_queries, key_dim) size
+        Returns:
+            embeddings: a torch array with (n_queries, max_neighbours, key_dim) size
+            labels: a torch array with (n_queries, max_neighbours) size
+        """
+        if self.added_memories == 0:
+            return None, None
+        if self.added_memories < n_neighbours:
+            n_neighbours = self.added_memories
+        mask_idx = min(
+            self.memory_size, 
+            self.added_memories
+        )
+        # Masking not filled memories
+        mask_memory = self.memory_embeddings[:mask_idx]
+
+        # Calculating pairwise distances between queries (q) and memory (m) entries
+        with torch.no_grad():
+            q_norm = torch.sum(queries ** 2, dim=1).view(-1, 1)
+            m_norm = torch.sum(mask_memory ** 2, dim=1).view(1, -1)
+            qm = torch.mm(queries, mask_memory.transpose(1, 0))
+            dist = q_norm - 2 * qm + m_norm
+
+            # Determining indices of nearest memories and fetching corresponding labels and embeddings
+            distances, idx = torch.topk(-dist, dim=1, k=n_neighbours)
+            distances = -1.0 * distances
+        return idx, distances
+
+    def add_entry(self, embeddings, labels, query_result=None):
+        """
+        Add entries to the memory module.
+
+        Parameters
+        ---
+        embeddings: a torch tensor with (batch, key_dim) size
+        labels: a torch tensor with (batch) size
+        query_result: dictionary
+            Result of query previously done on memory.
+        """
+        n_added = embeddings.shape[0]
+        for embedding, label in zip(embeddings, labels):
+            n = self.n_class_embeddings[label]
+            if self.class_discount_method == "mean":
+                class_discount = 1 / (n + 1)
+            self.class_representations[label] = (1 - class_discount) * self.class_representations[label] \
+                                                + class_discount * embedding
+            self.n_class_embeddings[label] += 1
+
+        if self.added_memories + n_added <= self.memory_size:
+            start = self.write_pointer + 1
+            end = start + n_added
+            self.update_ixs(range(start, end), embeddings, labels, query_result)
+            self.write_pointer += n_added
+        else:
+            capacity_remaining = max(self.memory_size - self.added_memories, 0)
+            if capacity_remaining > 0:
+                start = self.write_pointer + 1
+                self.update_ixs(range(start, self.memory_size), embeddings[:capacity_remaining], labels[:capacity_remaining],
+                                query_result, global_update=False)
+
+            n_overflow = n_added - capacity_remaining
+            # get least relevant indices
+            if self.delete_method == "relevance":
+                write_ixs = torch.topk(self.memory_relevance, n_overflow, largest=False).indices
+            elif self.delete_method == "age":
+                write_ixs = torch.topk(self.memory_age, n_overflow, largest=True).indices
+            self.update_ixs(write_ixs, embeddings[capacity_remaining:], labels[capacity_remaining:], query_result)
+        self.added_memories += n_added
+
+    def update_ixs(self, ixs, embeddings, labels, query_result=None, global_update=True):
+        """Update specific memory slots
         
+        If query_result is not supplied, relevance scores are not updated.
+        """
+        self.memory_embeddings[ixs] = embeddings
+        self.memory_labels[ixs] = labels
+        self.memory_age[ixs] = 0
+        self.memory_relevance[ixs] = 0
+        if global_update:
+            self.memory_age[self.memory_age != -1] += 1
+            if query_result is not None:
+                # relevance mask indicates which samples are deemed relevant based on the query results
+                # here this is simply which queries were closest to the query embedding, as well as the query itself
+                relevance_mask = torch.zeros_like(self.memory_relevance)
+                ix_counts = Counter(query_result["ix"].flatten().tolist())
+                for ix, count in ix_counts.items():
+                    relevance_mask[ix] = count
+                relevance_mask[ixs] = 1  # assign a relevance of 1 to newly added entries as well
+                # keep exponential moving average
+                self.memory_relevance = self.relevance_discount * self.memory_relevance + relevance_mask
+
+    def initialize(self):
+        """(Re-)Initialize memory"""
+        # Initializing memory to blank embeddings and "n_classes = not seen" labels
+        self.memory_embeddings = torch.zeros(
+            (self.memory_size, self.key_dim)).to(self.device)
+        # initialize to dummy value -1
+        self.memory_labels = -1 * torch.ones((self.memory_size,), dtype=torch.long).to(self.device)
+        self.memory_age = -1 * torch.ones((self.memory_size,), dtype=torch.long).to(self.device)
+        self.memory_relevance = torch.zeros((self.memory_size,), dtype=torch.long).to(self.device)
+        if self.n_classes is not None:
+            self.class_representations = torch.zeros((self.n_classes, self.key_dim)).to(self.device)
+            self.n_class_embeddings = torch.zeros(self.n_classes)
+
         self.write_pointer = -1
         self.added_memories = 0
 
