@@ -1,6 +1,7 @@
 import logging
 import math
 import time
+from contextlib import nullcontext
 
 import higher
 import torch
@@ -133,13 +134,14 @@ class OML(Learner):
                 self.meta_optimizer.step()
                 self.meta_optimizer.zero_grad()
 
-    def forward(self, text, labels, prediction_network, no_grad=False):
+    def forward(self, text, labels, prediction_network=None, no_grad=False):
+        if prediction_network is None:
+            prediction_network = self.pln
         input_dict = self.rln.encode_text(text)
-        if no_grad:
-            with torch.no_grad():
-                representation = self.rln(input_dict)
-                logits = prediction_network(representation)
-        else:
+        if prediction_network is None:
+            prediction_network = self.pln
+        context_manager = torch.no_grad() if no_grad else nullcontext()
+        with context_manager:
             representation = self.rln(input_dict)
             logits = prediction_network(representation)
         return {"logits": logits}
@@ -311,5 +313,5 @@ class OML(Learner):
                                   increment_counters, text, i, split=split)
                 if (i * self.config.testing.few_shot_batch_size) % self.mini_batch_size == 0 and i > 0:
                     all_predictions, all_labels = [], []
-        self.few_shot_counter += 1
+        self.few_shot_end()
 

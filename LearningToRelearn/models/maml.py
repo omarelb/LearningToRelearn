@@ -131,8 +131,10 @@ class MAML(Learner):
                 self.meta_optimizer.step()
                 self.meta_optimizer.zero_grad()
 
-    def forward(self, text, labels, prediction_network, no_grad=False):
+    def forward(self, text, labels, prediction_network=None, no_grad=False):
         input_dict = self.pn.encode_text(text)
+        if prediction_network is None:
+            prediction_network = self.pn
         if no_grad:
             with torch.no_grad():
                 logits = prediction_network(input_dict)
@@ -296,5 +298,5 @@ class MAML(Learner):
                                   increment_counters, text, i, split=split)
                 if (i * self.config.testing.few_shot_batch_size) % self.mini_batch_size == 0 and i > 0:
                     all_predictions, all_labels = [], []
-        self.few_shot_counter += 1
+        self.few_shot_end()
 
