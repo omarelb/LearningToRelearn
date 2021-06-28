@@ -39,7 +39,7 @@ METRICS_FILE = "metrics.json"
 BEST_MODEL_FNAME = "best-model.pt"
 TEMP_CHECKPOINT = "temp_checkpoint.pt"
 
-
+BASE_METALEARNERS = ("maml", "oml", "anml")
 class Learner:
     """Base Learner class.
 
@@ -113,7 +113,7 @@ class Learner:
         self.logger.info("TRAINING LOG")
         self.logger.info("-" * 50)
 
-        self.logger.info("-" * 50 + "\n" + f"CONFIG:\n{self.config}\n" + "-" * 50)
+        self.logger.info(f"CONFIG:\n{self.config}\n" + "-" * 50)
 
         # if checkpoint_exists:
         #     self.logger.info(f"Checkpoint for {self.exp_dir.name} ALREADY EXISTS. Continuing training.")
@@ -138,7 +138,6 @@ class Learner:
         self.log_freq = config.training.log_freq
         self.validate_freq = config.training.validate_freq
         self.type = config.learner.type
-        self.is_metalearner = self.type in ("maml", "oml", "anml")
 
         # replay attributes
         self.write_prob = config.learner.write_prob
@@ -161,7 +160,7 @@ class Learner:
         self.metrics["replay_samples_seen"] = 0
         # during evaluation this might happen
         if not test:
-            if (self.results_dir / METRICS_FILE).is_file():
+            if self.config.load_metrics and (self.results_dir / METRICS_FILE).is_file():
                 self.read_metrics()
         # keeps track of how many times we have performed few shot testing, for logging purposes
         self.few_shot_counter = 0
@@ -242,12 +241,12 @@ class Learner:
         results = {}
         accuracies, precisions, recalls, f1s = [], [], [], []
 
-        self.save_checkpoint(file_name=TEMP_CHECKPOINT, save_optimizer_state=True, delete_previous=False)
         if self.config.testing.n_samples_before_average_evaluate is None:
             self.config.testing.n_samples_before_average_evaluate = 80
         training_amounts = (0, self.config.testing.n_samples_before_average_evaluate)
         metrics_name = split + "_evaluation"
         for training_amount in training_amounts:
+            self.save_checkpoint(file_name=TEMP_CHECKPOINT, save_optimizer_state=True, delete_previous=False)
             metrics_key_average = "average" + f"_{training_amount}" * (training_amount > 0)
             # this has already been evaluated, no need to do it again
             # if metrics_key_average in self.metrics[metrics_name]:
@@ -260,7 +259,7 @@ class Learner:
                 self.metrics["n_samples_before_average_evaluate"] = n_batches * self.mini_batch_size
                 self.logger.info(f"Before evaluating average accuracy, train on {n_batches * self.mini_batch_size}"
                                 " samples from all datasets.")
-                if self.is_metalearner:
+                if self.type in BASE_METALEARNERS:
                     support_set, _ = self.get_support_set(train_dataloader, n_updates=n_batches)
                     self.inner_optimizer.zero_grad()
                     for text, labels in support_set:
@@ -270,7 +269,26 @@ class Learner:
                         loss = self.loss_fn(output["logits"], labels)
                         loss.backward()
                         self.inner_optimizer.step()
-                    self.training_step(support_set)
+                elif self.type == "memory_protomaml":
+                    self.inner_optimizer.zero_grad()
+                    support_set, _ = self.get_support_set(train_dataloader, n_updates=n_batches)
+                    # ### GET SUPPORT SET REPRESENTATIONS ###
+                    # representations, all_labels = self.get_representations(support_set)
+                    # representations_merged = torch.cat(representations)
+                    # class_means, unique_labels = self.get_class_means(representations_merged, all_labels)
+                    # ### UPDATE MEMORY ###
+                    # self.update_memory(class_means, unique_labels)
+                    ### DETERMINE WHAT'S SEEN AS PROTOTYPE ###
+                    ### INITIALIZE LINEAR LAYER WITH PROTOYPICAL-EQUIVALENT WEIGHTS ###
+                    prototypes = self.memory.class_representations
+                    self.init_prototypical_classifier(prototypes)
+                    for text, labels in support_set:
+                        labels = torch.tensor(labels).to(self.device)
+                        # labels = labels.to(self.device)
+                        output = self.forward(text, labels)
+                        loss = self.loss_fn(output["logits"], labels)
+                        loss.backward()
+                        self.inner_optimizer.step()
                 else:
                     for _ in range(n_batches):
                         text, labels, _ = next(train_dataloader)
@@ -676,7 +694,7 @@ class Learner:
     def read_metrics(self):
         try:
             with open(self.results_dir / METRICS_FILE) as f:
-                self.metrics = json.load(f)
+                self.metrics = collections.defaultdict(dict, json.load(f))
         except Exception as e:
             print(e)
 
