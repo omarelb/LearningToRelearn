@@ -17,6 +17,8 @@ learner:
   replay_every: 9600 # Number of data points between replay
   updates: 5 # number of inner loop updates
   clip_grad_norm: 25 # gradient norm clipping (for replay learner)
+  class_discount: 0.01 # exponential decay factor class representation
+  class_discount_method: "exponential" # "mean" or "exponential"
 
 data:
   alternating_order: false # whether to use an alternating order in the data
@@ -33,6 +35,7 @@ testing:
   few_shot_validation_size: 100 # sample a subset so validation doesn't take too long during few shot evaluation
   average_validation_size: # sample a subset so validation doesn't take too long during computation of average accuracy. use for debugging purposes
   eval_split: val # either "val" or "test", decides which split to use when evaluating
+  n_samples_before_average_evaluate: 80 # before average evaluation, how many samples to train on (in addition to zero-shot)
 
 seed: 42 # random seed
 inference: false
@@ -49,6 +52,7 @@ wandb: true # whether to use weights and biases for logging
 debug_logging: false # log debug things
 debug_data: false # use a small dataset
 name: # experiment name, not specified by default, making it None
+load_metrics: true  # whether to load metrics file if it already exists in the same directory
 
 hydra:
   run:
