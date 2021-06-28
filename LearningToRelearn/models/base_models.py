@@ -281,9 +281,9 @@ class ClassMemoryStore(MemoryStore):
     """
     Memory component for class representations.
     """
-    def __init__(self, memory_size, key_dim, relevance_discount=0.99, delete_method="age",
+    def __init__(self, key_dim, relevance_discount=0.99, delete_method="age",
                  n_classes=None, discount_method="mean", class_discount=0.99, device="cpu"):
-        super().__init__(memory_size, key_dim, relevance_discount, delete_method, device, initialize=False)
+        super().__init__(n_classes, key_dim, relevance_discount, delete_method, device, initialize=False)
         self.n_classes = n_classes
         self.class_discount_method = discount_method
         self.class_discount = class_discount
@@ -355,6 +355,7 @@ class ClassMemoryStore(MemoryStore):
             Result of query previously done on memory.
         """
         n_added = embeddings.shape[0]
+        class_discount = self.class_discount
         for embedding, label in zip(embeddings, labels):
             n = self.n_class_embeddings[label]
             if self.class_discount_method == "mean":
@@ -363,25 +364,6 @@ class ClassMemoryStore(MemoryStore):
                                                 + class_discount * embedding
             self.n_class_embeddings[label] += 1
 
-        if self.added_memories + n_added <= self.memory_size:
-            start = self.write_pointer + 1
-            end = start + n_added
-            self.update_ixs(range(start, end), embeddings, labels, query_result)
-            self.write_pointer += n_added
-        else:
-            capacity_remaining = max(self.memory_size - self.added_memories, 0)
-            if capacity_remaining > 0:
-                start = self.write_pointer + 1
-                self.update_ixs(range(start, self.memory_size), embeddings[:capacity_remaining], labels[:capacity_remaining],
-                                query_result, global_update=False)
-
-            n_overflow = n_added - capacity_remaining
-            # get least relevant indices
-            if self.delete_method == "relevance":
-                write_ixs = torch.topk(self.memory_relevance, n_overflow, largest=False).indices
-            elif self.delete_method == "age":
-                write_ixs = torch.topk(self.memory_age, n_overflow, largest=True).indices
-            self.update_ixs(write_ixs, embeddings[capacity_remaining:], labels[capacity_remaining:], query_result)
         self.added_memories += n_added
 
     def update_ixs(self, ixs, embeddings, labels, query_result=None, global_update=True):
