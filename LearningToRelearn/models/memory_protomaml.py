@@ -37,22 +37,32 @@ class MemoryProtomaml(Learner):
         self.meta_lr = config.learner.meta_lr
         self.mini_batch_size = config.training.batch_size
 
-        self.encoder = TransformerRLN(model_name=config.learner.model_name,
+        self.pn = TransformerClsModel(model_name=config.learner.model_name,
+                                      n_classes=config.data.n_classes,
                                       max_length=config.data.max_length,
                                       device=self.device)
-        self.classifier = nn.Linear(TRANSFORMER_HDIM, config.data.n_classes).to(self.device)
+
+        # self.encoder = TransformerRLN(model_name=config.learner.model_name,
+        #                               max_length=config.data.max_length,
+        #                               device=self.device)
+        # self.classifier = nn.Linear(TRANSFORMER_HDIM, config.data.n_classes).to(self.device)
 #         self.memory = MemoryStore(memory_size=config.learner.memory_size, key_dim=TRANSFORMER_HDIM, device=self.device)
         self.memory = ClassMemoryStore(key_dim=TRANSFORMER_HDIM, device=self.device,
                                        class_discount=config.learner.class_discount, n_classes=config.data.n_classes,
                                        discount_method=config.learner.class_discount_method)
         self.loss_fn = nn.CrossEntropyLoss()
 
-        self.logger.info("Loaded {} as encoder".format(self.encoder.__class__.__name__))
+        # self.logger.info("Loaded {} as encoder".format(self.encoder.__class__.__name__))
+        # meta_params = [p for p in self.encoder.parameters() if p.requires_grad]
+        # self.meta_optimizer = AdamW(meta_params, lr=self.meta_lr)
 
-        meta_params = [p for p in self.encoder.parameters() if p.requires_grad]
+        # inner_params = [p for p in self.classifier.parameters() if p.requires_grad]
+        # self.inner_optimizer = optim.SGD(inner_params, lr=self.inner_lr)
+
+        meta_params = [p for p in self.pn.parameters() if p.requires_grad]
         self.meta_optimizer = AdamW(meta_params, lr=self.meta_lr)
 
-        inner_params = [p for p in self.classifier.parameters() if p.requires_grad]
+        inner_params = [p for p in self.pn.parameters() if p.requires_grad]
         self.inner_optimizer = optim.SGD(inner_params, lr=self.inner_lr)
         #TODO: remove below line
         self.episode_samples_seen = 0 # have to keep track of per-task samples seen as we might use replay as well
@@ -94,62 +104,71 @@ class MemoryProtomaml(Learner):
         self.inner_optimizer.zero_grad()
 
         self.logger.debug("-------------------- TRAINING STEP  -------------------")
-        if self.config.learner.prototype_update_freq > 0 and \
-           (self.current_iter % self.config.learner.prototype_update_freq) == 0:
-            ### GET SUPPORT SET REPRESENTATIONS ###
-            representations, all_labels = self.get_representations(support_set)
-            representations_merged = torch.cat(representations)
-            class_means, unique_labels = self.get_class_means(representations_merged, all_labels)
-
-            ### UPDATE MEMORY ###
-            self.update_memory(class_means, unique_labels)
-
-        ### DETERMINE WHAT'S SEEN AS PROTOTYPE ###
-        if self.config.learner.prototypes == "class_means":
-            prototypes = class_means
-        elif self.config.learner.prototypes == "memory":
-            prototypes = self.memory.class_representations
-        else:
-            raise AssertionError("Prototype type not correctly specified.")
-
-        ### INITIALIZE LINEAR LAYER WITH PROTOYPICAL-EQUIVALENT WEIGHTS ###
-        self.init_prototypical_classifier(prototypes)
-
-        self.logger.debug("----------------- SUPPORT SET ----------------- ")
-        ### TRAIN LINEAR CLASSIFIER ON SUPPORT SET ###
-        with higher.innerloop_ctx(self.classifier, self.inner_optimizer,
+        with higher.innerloop_ctx(self.pn, self.inner_optimizer,
                                   copy_initial_weights=False,
-                                  track_higher_grads=False) as (fclassifier, diffopt):
+                                  track_higher_grads=False) as (fpn, diffopt):
+            do_memory_update = self.config.learner.prototype_update_freq > 0 and \
+                            (self.current_iter % self.config.learner.prototype_update_freq) == 0
+            if do_memory_update:
+                ### GET SUPPORT SET REPRESENTATIONS ###
+                representations, all_labels = self.get_representations(support_set[:1], prediction_network=fpn)
+                representations_merged = torch.cat(representations)
+                class_means, unique_labels = self.get_class_means(representations_merged, all_labels)
+
+                ### UPDATE MEMORY ###
+                self.update_memory(class_means, unique_labels)
+
+            ### DETERMINE WHAT'S SEEN AS PROTOTYPE ###
+            if self.config.learner.prototypes == "class_means":
+                prototypes = class_means
+            elif self.config.learner.prototypes == "memory":
+                prototypes = self.memory.class_representations
+            else:
+                raise AssertionError("Prototype type not in {'class_means', 'memory'}, fix config file.")
+
+            ### INITIALIZE LINEAR LAYER WITH PROTOYPICAL-EQUIVALENT WEIGHTS ###
+            # self.init_prototypical_classifier(prototypes, linear_module=fpn.linear)
+
+            self.logger.debug("----------------- SUPPORT SET ----------------- ")
+            ### TRAIN LINEAR CLASSIFIER ON SUPPORT SET ###
             # Inner loop
-            for representation, (_, labels) in zip(representations, support_set):
+            for i, (text, labels) in enumerate(support_set):
+                self.logger.debug(f"----------------- {i}th Update ----------------- ")
                 labels = torch.tensor(labels).to(self.device)
-                output = fclassifier(representation)
+                if do_memory_update and i == 0:
+                    output = {
+                        "representation": representations[0],
+                        "logits": fpn(representations[0], out_from="linear")
+                    } 
+                else:
+                    output = self.forward(text, labels, fpn)
 
                 # for logging purposes
-                prototype_distances = (representation.unsqueeze(1) - prototypes).norm(dim=-1)
+                prototype_distances = (output["representation"].unsqueeze(1) - prototypes).norm(dim=-1)
                 closest_dists, closest_classes = prototype_distances.topk(3, largest=False)
                 to_print = pprint.pformat(list(map(lambda x: (x[0].item(), x[1].tolist(),
                                           [round(z, 2) for z in x[2].tolist()]),
                                           list(zip(labels, closest_classes, closest_dists)))))
                 self.logger.debug(f"True labels, closest prototypes, and distances:\n{to_print}")
 
-                topk = output.topk(5, dim=1)
+                topk = output["logits"].topk(5, dim=1)
                 to_print = pprint.pformat(list(map(lambda x: (x[0].item(), x[1].tolist(),
                                         [round(z, 3) for z in x[2].tolist()]),
                                         list(zip(labels, topk[1], topk[0])))))
                 self.logger.debug(f"(label, topk_classes, topk_logits) before update:\n{to_print}")
-                # self.logger.debug(f"Largest logits before update: {output.topk(5, dim=1)}")
 
-                loss = self.loss_fn(output, labels)
+                loss = self.loss_fn(output["logits"], labels)
                 diffopt.step(loss)
 
-                topk = fclassifier(representation).topk(5, dim=1)
+                # see how much linear classifier has changed
+                with torch.no_grad():
+                    topk = fpn(output["representation"], out_from="linear").topk(5, dim=1)
                 to_print = pprint.pformat(list(map(lambda x: (x[0].item(), x[1].tolist(),
                                         [round(z, 3) for z in x[2].tolist()]),
                                         list(zip(labels, topk[1], topk[0])))))
                 self.logger.debug(f"(label, topk_classes, topk_logits) after update:\n{to_print}")
 
-                predictions = model_utils.make_prediction(output.detach())
+                predictions = model_utils.make_prediction(output["logits"].detach())
                 self.update_support_tracker(loss, predictions, labels)
                 metrics = model_utils.calculate_metrics(predictions.tolist(), labels.tolist())
                 online_metrics = {
@@ -161,7 +180,7 @@ class MemoryProtomaml(Learner):
                 if task is not None and task == self.config.testing.eval_dataset and \
                     self.eval_task_first_encounter:
                     self.metrics["eval_task_first_encounter"].append(online_metrics)
-                self._examples_seen += len(representation)
+                self._examples_seen += len(text)
 
             self.logger.debug("----------------- QUERY SET  ----------------- ")
             ### EVALUATE ON QUERY SET AND UPDATE ENCODER ###
@@ -170,9 +189,9 @@ class MemoryProtomaml(Learner):
                 for text, labels in query_set:
                     labels = torch.tensor(labels).to(self.device)
                     # labels = labels.to(self.device)
-                    output = self.forward(text, labels, prediction_network=fclassifier)
+                    output = self.forward(text, labels, prediction_network=fpn)
                     loss = self.loss_fn(output["logits"], labels)
-                    self.update_meta_gradients(loss)
+                    self.update_meta_gradients(loss, fpn)
 
                     topk = output['logits'].topk(5, dim=1)
                     to_print = pprint.pformat(list(map(lambda x: (x[0].item(), x[1].tolist(),
@@ -199,25 +218,25 @@ class MemoryProtomaml(Learner):
                 self.meta_optimizer.zero_grad()
         self.logger.debug("-------------------- TRAINING STEP END  -------------------")
 
-    def get_representations(self, support_set):
+    def get_representations(self, support_set, prediction_network=None):
         representations = []
         all_labels = []
         for text, labels in support_set:
             labels = torch.tensor(labels).to(self.device)
             all_labels.extend(labels.tolist())
             # labels = labels.to(self.device)
-            output = self.forward(text, labels, update_memory=False)
+            output = self.forward(text, labels, prediction_network=prediction_network, update_memory=False)
             representations.append(output["representation"])
         return representations, all_labels
 
     def forward(self, text, labels, prediction_network=None, update_memory=False, no_grad=False):
         if prediction_network is None:
-            prediction_network = self.classifier
-        input_dict = self.encoder.encode_text(text)
+            prediction_network = self.pn
+        input_dict = self.pn.encode_text(text)
         context_manager = torch.no_grad() if no_grad else nullcontext()
         with context_manager:
-            representation = self.encoder(input_dict)
-            logits = prediction_network(representation)
+            representation = prediction_network(input_dict, out_from="transformers")
+            logits = prediction_network(representation, out_from="linear")
             
         if update_memory:
             self.memory.add_entry(embeddings=representation.detach(), labels=labels, query_result=None)
@@ -240,7 +259,9 @@ class MemoryProtomaml(Learner):
         # update memory
         self.memory.class_representations[to_update] = new_class_representations.detach()
 
-    def init_prototypical_classifier(self, prototypes):
+    def init_prototypical_classifier(self, prototypes, linear_module=None):
+        if linear_module is None:
+            linear_module = self.pn.linear
         weight = 2 * prototypes / TRANSFORMER_HDIM # divide by number of dimensions, otherwise blows up
         bias = - (prototypes ** 2).sum(dim=1) / TRANSFORMER_HDIM
         # otherwise the bias of the classes observed in the support set is always smaller than 
@@ -251,8 +272,8 @@ class MemoryProtomaml(Learner):
         self.logger.info(f"Prototype is zero vector for classes {bias_unchanged.nonzero(as_tuple=True)[0].tolist()}. "
                          f"Setting their bias entries to the minimum of the uninitialized bias vector.")
         # prototypical-equivalent network initialization
-        self.classifier.weight.data = weight
-        self.classifier.bias.data = bias
+        linear_module.weight.data = weight
+        linear_module.bias.data = bias
         self.logger.info(f"Classifier bias initialized to {bias}.")
         
         # a = mmaml.classifier.weight
@@ -269,12 +290,12 @@ class MemoryProtomaml(Learner):
         # weight_copy = self.classifier.weight[:]
         # bias_copy = self.classifier.bias[:]
 
-    def update_meta_gradients(self, loss):
+    def update_meta_gradients(self, loss, fpn):
         # PN meta gradients
-        encoder_params = [p for p in self.encoder.parameters() if p.requires_grad]
-        meta_encoder_grads = torch.autograd.grad(loss, encoder_params, allow_unused=True)
-        encoder_params = [p for p in self.encoder.parameters() if p.requires_grad]
-        for param, meta_grad in zip(encoder_params, meta_encoder_grads):
+        pn_params = [p for p in fpn.parameters() if p.requires_grad]
+        meta_pn_grads = torch.autograd.grad(loss, pn_params, allow_unused=True)
+        pn_params = [p for p in self.pn.parameters() if p.requires_grad]
+        for param, meta_grad in zip(pn_params, meta_pn_grads):
             if meta_grad is not None:
                 if param.grad is not None:
                     param.grad += meta_grad.detach()
@@ -308,19 +329,19 @@ class MemoryProtomaml(Learner):
                 text, labels = self.memory.read_batch(batch_size=self.mini_batch_size)
                 support_set.append((text, labels))
 
-        with higher.innerloop_ctx(self.classifier, self.inner_optimizer,
+        with higher.innerloop_ctx(self.pn, self.inner_optimizer,
                                 copy_initial_weights=False,
-                                track_higher_grads=False) as (fclassifier, diffopt):
+                                track_higher_grads=False) as (fpn, diffopt):
             if self.config.learner.evaluation_support_set:
                 self.set_train()
-                support_prediction_network = fclassifier
+                support_prediction_network = fpn
                 # Inner loop
                 task_predictions, task_labels = [], []
                 support_loss = []
                 for text, labels in support_set:
                     labels = torch.tensor(labels).to(self.device)
                     # labels = labels.to(self.device)
-                    output = self.forward(text, labels, fclassifier)
+                    output = self.forward(text, labels, fpn)
                     loss = self.loss_fn(output["logits"], labels)
                     diffopt.step(loss)
 
@@ -334,13 +355,13 @@ class MemoryProtomaml(Learner):
                             results["precision"], results["recall"], results["f1"]))
                 self.set_eval()
             else:
-                support_prediction_network = self.classifier
+                support_prediction_network = self.pn
             if prediction_network is None:
                 prediction_network = support_prediction_network
 
             self.set_eval()
             all_losses, all_predictions, all_labels = [], [], []
-            for i, (text, labels, datasets) in enumerate(dataloader):
+            for i, (text, labels, _) in enumerate(dataloader):
                 labels = torch.tensor(labels).to(self.device)
                 # labels = labels.to(self.device)
                 output = self.forward(text, labels, prediction_network, no_grad=True)
@@ -360,13 +381,13 @@ class MemoryProtomaml(Learner):
         return results
 
     def model_state(self):
-        return {"encoder": self.encoder.state_dict()}
+        return {"pn": self.pn.state_dict()}
 
     def optimizer_state(self):
         return self.meta_optimizer.state_dict()
 
     def load_model_state(self, checkpoint):
-        self.encoder.load_state_dict(checkpoint["model_state"]["encoder"])
+        self.pn.load_state_dict(checkpoint["model_state"]["pn"])
 
     def load_optimizer_state(self, checkpoint):
         self.meta_optimizer.load_state_dict(checkpoint["optimizer"])
@@ -380,10 +401,10 @@ class MemoryProtomaml(Learner):
         self.memory = checkpoint["memory"]
 
     def set_eval(self):
-        self.encoder.eval()
+        self.pn.eval()
 
     def set_train(self):
-        self.encoder.train()
+        self.pn.train()
 
     def few_shot_testing(self, train_dataset, eval_dataset, increment_counters=False, split="test"):
         """
@@ -407,14 +428,14 @@ class MemoryProtomaml(Learner):
         all_predictions, all_labels = [], []
 
         self.init_prototypical_classifier(prototypes=self.memory.class_representations)
-        with higher.innerloop_ctx(self.classifier, self.inner_optimizer,
+        with higher.innerloop_ctx(self.pn, self.inner_optimizer,
                                 copy_initial_weights=False,
-                                track_higher_grads=False) as (fclassifier, diffopt):
+                                track_higher_grads=False) as (fpn, diffopt):
             # Inner loop
             for i, (text, labels, datasets) in enumerate(train_dataloader):
                 self.set_train()
                 labels = torch.tensor(labels).to(self.device)
-                output = self.forward(text, labels, fclassifier)
+                output = self.forward(text, labels, fpn)
                 prototype_distances = (output['representation'] - self.memory.class_representations).norm(dim=1)
                 class_distances = list(map(lambda x: (x[0].item(), x[1].item()), list(zip(torch.arange(len(prototype_distances)), prototype_distances))))
                 self.logger.info(f"Ground truth: {labels} -- Prototype distances: {class_distances}")
@@ -424,7 +445,7 @@ class MemoryProtomaml(Learner):
                 predictions = model_utils.make_prediction(output["logits"].detach())
                 all_predictions.extend(predictions.tolist())
                 all_labels.extend(labels.tolist())
-                dataset_results = self.evaluate(dataloader=eval_dataloader, prediction_network=fclassifier)
+                dataset_results = self.evaluate(dataloader=eval_dataloader, prediction_network=fpn)
                 self.log_few_shot(all_predictions, all_labels, datasets, dataset_results,
                                   increment_counters, text, i, split=split)
                 if (i * self.config.testing.few_shot_batch_size) % self.mini_batch_size == 0 and i > 0:
