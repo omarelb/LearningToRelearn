@@ -104,30 +104,32 @@ class MemoryProtomaml(Learner):
         self.inner_optimizer.zero_grad()
 
         self.logger.debug("-------------------- TRAINING STEP  -------------------")
+
+        ### GET SUPPORT SET REPRESENTATIONS ###
+        with torch.no_grad():
+            representations, all_labels = self.get_representations(support_set[:1])
+            representations_merged = torch.cat(representations)
+            class_means, unique_labels = self.get_class_means(representations_merged, all_labels)
+
+        do_memory_update = self.config.learner.prototype_update_freq > 0 and \
+                        (self.current_iter % self.config.learner.prototype_update_freq) == 0
+        if do_memory_update:
+            ### UPDATE MEMORY ###
+            updated_memory_representations = self.memory.update(class_means, unique_labels, logger=self.logger)
+
+        ### DETERMINE WHAT'S SEEN AS PROTOTYPE ###
+        if self.config.learner.prototypes == "class_means":
+            prototypes = class_means.detach()
+        elif self.config.learner.prototypes == "memory":
+            prototypes = self.memory.class_representations # doesn't track prototype gradients
+        else:
+            raise AssertionError("Prototype type not in {'class_means', 'memory'}, fix config file.")
+
         with higher.innerloop_ctx(self.pn, self.inner_optimizer,
                                   copy_initial_weights=False,
                                   track_higher_grads=False) as (fpn, diffopt):
-            do_memory_update = self.config.learner.prototype_update_freq > 0 and \
-                            (self.current_iter % self.config.learner.prototype_update_freq) == 0
-            if do_memory_update:
-                ### GET SUPPORT SET REPRESENTATIONS ###
-                representations, all_labels = self.get_representations(support_set[:1], prediction_network=fpn)
-                representations_merged = torch.cat(representations)
-                class_means, unique_labels = self.get_class_means(representations_merged, all_labels)
-
-                ### UPDATE MEMORY ###
-                self.update_memory(class_means, unique_labels)
-
-            ### DETERMINE WHAT'S SEEN AS PROTOTYPE ###
-            if self.config.learner.prototypes == "class_means":
-                prototypes = class_means
-            elif self.config.learner.prototypes == "memory":
-                prototypes = self.memory.class_representations
-            else:
-                raise AssertionError("Prototype type not in {'class_means', 'memory'}, fix config file.")
-
             ### INITIALIZE LINEAR LAYER WITH PROTOYPICAL-EQUIVALENT WEIGHTS ###
-            # self.init_prototypical_classifier(prototypes, linear_module=fpn.linear)
+            self.init_prototypical_classifier(prototypes, linear_module=fpn.linear)
 
             self.logger.debug("----------------- SUPPORT SET ----------------- ")
             ### TRAIN LINEAR CLASSIFIER ON SUPPORT SET ###
@@ -135,13 +137,13 @@ class MemoryProtomaml(Learner):
             for i, (text, labels) in enumerate(support_set):
                 self.logger.debug(f"----------------- {i}th Update ----------------- ")
                 labels = torch.tensor(labels).to(self.device)
-                if do_memory_update and i == 0:
-                    output = {
-                        "representation": representations[0],
-                        "logits": fpn(representations[0], out_from="linear")
-                    } 
-                else:
-                    output = self.forward(text, labels, fpn)
+                # if i == 0:
+                #     output = {
+                #         "representation": representations[0],
+                #         "logits": fpn(representations[0], out_from="linear")
+                #     } 
+                # else:
+                output = self.forward(text, labels, fpn)
 
                 # for logging purposes
                 prototype_distances = (output["representation"].unsqueeze(1) - prototypes).norm(dim=-1)
@@ -262,8 +264,8 @@ class MemoryProtomaml(Learner):
     def init_prototypical_classifier(self, prototypes, linear_module=None):
         if linear_module is None:
             linear_module = self.pn.linear
-        weight = 2 * prototypes / TRANSFORMER_HDIM # divide by number of dimensions, otherwise blows up
-        bias = - (prototypes ** 2).sum(dim=1) / TRANSFORMER_HDIM
+        weight = 2 * prototypes # divide by number of dimensions, otherwise blows up
+        bias = - (prototypes ** 2).sum(dim=1)
         # otherwise the bias of the classes observed in the support set is always smaller than 
         # not observed ones, which favors the unobserved ones. However, it is expected that labels
         # in the support set are more likely to be in the query set.

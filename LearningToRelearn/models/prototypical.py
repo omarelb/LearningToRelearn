@@ -7,6 +7,7 @@ from contextlib import nullcontext
 import higher
 import torch
 from torch import nn, optim
+import wandb
 import yaml
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
@@ -41,23 +42,13 @@ class PrototypicalNetwork(Learner):
                                       n_classes=config.data.n_classes,
                                       max_length=config.data.max_length,
                                       device=self.device)
+        if config.wandb:
+            wandb.watch(self.pn, log='all')
 
-        # self.encoder = TransformerRLN(model_name=config.learner.model_name,
-        #                               max_length=config.data.max_length,
-        #                               device=self.device)
-        # self.classifier = nn.Linear(TRANSFORMER_HDIM, config.data.n_classes).to(self.device)
-#         self.memory = MemoryStore(memory_size=config.learner.memory_size, key_dim=TRANSFORMER_HDIM, device=self.device)
         self.memory = ClassMemoryStore(key_dim=TRANSFORMER_HDIM, device=self.device,
                                        class_discount=config.learner.class_discount, n_classes=config.data.n_classes,
                                        discount_method=config.learner.class_discount_method)
         self.loss_fn = nn.CrossEntropyLoss()
-
-        # self.logger.info("Loaded {} as encoder".format(self.encoder.__class__.__name__))
-        # meta_params = [p for p in self.encoder.parameters() if p.requires_grad]
-        # self.meta_optimizer = AdamW(meta_params, lr=self.meta_lr)
-
-        # inner_params = [p for p in self.classifier.parameters() if p.requires_grad]
-        # self.inner_optimizer = optim.SGD(inner_params, lr=self.inner_lr)
 
         meta_params = [p for p in self.pn.parameters() if p.requires_grad]
         self.meta_optimizer = AdamW(meta_params, lr=self.meta_lr)
@@ -76,7 +67,7 @@ class PrototypicalNetwork(Learner):
         for data, dataset_name, n_sample in zip(datas, order, n_samples):
             self.logger.info(f"Observing dataset {dataset_name} for {n_sample} samples. "
                              f"Evaluation={dataset_name=='evaluation'}")
-            if dataset_name == "evaluation":
+            if dataset_name == "evaluation" and self.config.testing.few_shot:
                 self.few_shot_testing(train_dataset=eval_train_dataset, eval_dataset=eval_eval_dataset, split="test",
                                       increment_counters=False)
             else:
@@ -114,23 +105,24 @@ class PrototypicalNetwork(Learner):
         representations, all_labels = self.get_representations(support_set[:1])
         representations_merged = torch.cat(representations)
         class_means, unique_labels = self.get_class_means(representations_merged, all_labels)
-        n_classes = len(unique_labels)
         self._examples_seen += len(representations_merged)
         self.logger.debug(f"Examples seen increased by {len(representations_merged)}")
 
         ### UPDATE MEMORY ###
-        # if do_memory_update:
-        #     self.update_memory(class_means, unique_labels)
+        if do_memory_update:
+            updated_memory_representations = self.memory.update(class_means, unique_labels, logger=self.logger)
         ### DETERMINE WHAT'S SEEN AS PROTOTYPE ###
-        # if self.config.learner.prototypes == "class_means":
-        #     prototypes = class_means
-        # elif self.config.learner.prototypes == "memory":
-        #     prototypes = self.memory.class_representations
-        # else:
-        #     raise AssertionError("Prototype type not in {'class_means', 'memory'}, fix config file.")
+        if self.config.learner.prototypes == "class_means":
+            prototypes = expand_class_representations(self.memory.class_representations, class_means, unique_labels)
+        elif self.config.learner.prototypes == "memory":
+            prototypes = updated_memory_representations
+        else:
+            raise AssertionError("Prototype type not in {'class_means', 'memory'}, fix config file.")
 
         ### INITIALIZE LINEAR LAYER WITH PROTOYPICAL-EQUIVALENT WEIGHTS ###
         # self.init_prototypical_classifier(prototypes, linear_module=fpn.linear)
+        weight = 2 * prototypes # divide by number of dimensions, otherwise blows up
+        bias = - (prototypes ** 2).sum(dim=1)
 
         self.logger.debug("----------------- QUERY SET  ----------------- ")
         ### EVALUATE ON QUERY SET AND UPDATE ENCODER ###
@@ -139,38 +131,28 @@ class PrototypicalNetwork(Learner):
             for text, labels in query_set:
                 labels = torch.tensor(labels).to(self.device)
                 query_representations = self.forward(text, labels)["representation"]
-                # map labels to their index in prototypes vector
-                label_map = {x: y for x, y in zip(unique_labels.tolist(), np.arange(len(unique_labels)))}
-                inv_label_map = {y: x for x, y in label_map.items()}
 
-                # for now skip classes that were not present in the support set
-                ixs_not_in_support_set = [i for i, label in enumerate(labels) if label.item() not in label_map]
-                new_ixs = list(set(np.arange(len(labels))) - set(ixs_not_in_support_set))
-                query_representations = query_representations[new_ixs]
-                labels = labels[new_ixs]
-                self.logger.debug(f"Ignoring {len(ixs_not_in_support_set)} labels"
-                                   " as their class is not in the support set.")
-
-                # map each observation to appropriate class in prototypes for indexing loss matrix
-                target_indices = torch.tensor([label_map[label.item()] for label in labels])
                 # distance query representations to prototypes (BATCH X N_PROTOTYPES)
-                distances = euclidean_dist(query_representations, prototypes)
-                log_probability = F.log_softmax(-distances, dim=1)
+                # distances = euclidean_dist(query_representations, prototypes)
+                # logits = - distances
+                logits = query_representations @ weight.T + bias
+                loss = self.loss_fn(logits, labels)
+                # log_probability = F.log_softmax(-distances, dim=1)
                 # loss is negation of the log probability, index using the labels for each observation
-                loss = (- log_probability[torch.arange(len(log_probability)), target_indices]).mean()
+                # loss = (- log_probability[torch.arange(len(log_probability)), labels]).mean()
                 self.meta_optimizer.zero_grad()
                 loss.backward()
                 self.meta_optimizer.step()
 
-                predictions = model_utils.make_prediction(log_probability.detach())
-                predictions = torch.tensor([inv_label_map[p.item()] for p in predictions])
-                to_print = pprint.pformat(list(map(lambda x: (x[0].item(), x[1].item(), x[2].item(),
-                                        [round(z, 3) for z in x[3].tolist()]),
-                                        list(zip(labels, target_indices, predictions, distances)))))
+                predictions = model_utils.make_prediction(logits.detach())
+                # predictions = torch.tensor([inv_label_map[p.item()] for p in predictions])
+                # to_print = pprint.pformat(list(map(lambda x: (x[0].item(), x[1].item(),
+                #                         [round(z, 3) for z in x[2].tolist()]),
+                #                         list(zip(labels, predictions, distances)))))
                 self.logger.debug(
                     f"Unique Labels: {unique_labels.tolist()}\n"
-                    f"Labels, Indices, Predictions, Distances:\n{to_print}\n"
-                    f"Loss:\n{- log_probability}\n"
+                    # f"Labels, Indices, Predictions, Distances:\n{to_print}\n"
+                    f"Loss:\n{loss.item()}\n"
                     f"Predictions:\n{predictions}\n"
                 )
                 self.update_query_tracker(loss, predictions, labels)
@@ -193,17 +175,28 @@ class PrototypicalNetwork(Learner):
         self.logger.debug("-------------------- TRAINING STEP END  -------------------")
 
     def get_representations(self, support_set, prediction_network=None):
+        """
+        Parameters
+        ---
+        support_set: List[Tuple[batch text, batch labels]]
+        prediction network: pytorch module 
+
+        Returns
+        ---
+        Tuple[List[Tensor], List[Int]] where the first result is the hidden representation and the second
+        the labels.
+        """
         representations = []
         all_labels = []
         for text, labels in support_set:
             labels = torch.tensor(labels).to(self.device)
             all_labels.extend(labels.tolist())
             # labels = labels.to(self.device)
-            output = self.forward(text, labels, prediction_network=prediction_network, update_memory=False)
+            output = self.forward(text, labels, prediction_network=prediction_network)
             representations.append(output["representation"])
         return representations, all_labels
 
-    def forward(self, text, labels, prediction_network=None, update_memory=False, no_grad=False):
+    def forward(self, text, labels, prediction_network=None, no_grad=False):
         if prediction_network is None:
             prediction_network = self.pn
         input_dict = self.pn.encode_text(text)
@@ -211,9 +204,6 @@ class PrototypicalNetwork(Learner):
         with context_manager:
             representation = prediction_network(input_dict, out_from="transformers")
             logits = prediction_network(representation, out_from="linear")
-            
-        if update_memory:
-            self.memory.add_entry(embeddings=representation.detach(), labels=labels, query_result=None)
         return {"representation": representation, "logits": logits}
     
     def update_memory(self, class_means, unique_labels):
@@ -230,8 +220,13 @@ class PrototypicalNetwork(Learner):
                          f"Distance old class representations and class means: {[round(z, 2) for z in (old_class_representations - class_means).norm(dim=1).tolist()]}\n"
                          f"Distance old and new class representations: {[round(z, 2) for z in (new_class_representations - old_class_representations).norm(dim=1).tolist()]}"
                          )
+        # for returning new class representations while keeping gradients intact
+        result = torch.clone(self.memory.class_representations)
+        result[to_update] = new_class_representations
         # update memory
         self.memory.class_representations[to_update] = new_class_representations.detach()
+
+        return result
 
     def init_prototypical_classifier(self, prototypes, linear_module=None):
         if linear_module is None:
@@ -297,56 +292,58 @@ class PrototypicalNetwork(Learner):
         }
 
     def evaluate(self, dataloader, prediction_network=None):
-        if self.config.learner.evaluation_support_set:
-            support_set = []
-            for _ in range(self.config.learner.updates):
-                text, labels = self.memory.read_batch(batch_size=self.mini_batch_size)
-                support_set.append((text, labels))
+        # if self.config.learner.evaluation_support_set:
+        #     support_set = []
+        #     for _ in range(self.config.learner.updates):
+        #         text, labels = self.memory.read_batch(batch_size=self.mini_batch_size)
+        #         support_set.append((text, labels))
 
-        with higher.innerloop_ctx(self.pn, self.inner_optimizer,
-                                copy_initial_weights=False,
-                                track_higher_grads=False) as (fpn, diffopt):
-            if self.config.learner.evaluation_support_set:
-                self.set_train()
-                support_prediction_network = fpn
-                # Inner loop
-                task_predictions, task_labels = [], []
-                support_loss = []
-                for text, labels in support_set:
-                    labels = torch.tensor(labels).to(self.device)
-                    # labels = labels.to(self.device)
-                    output = self.forward(text, labels, fpn)
-                    loss = self.loss_fn(output["logits"], labels)
-                    diffopt.step(loss)
+        # with higher.innerloop_ctx(self.pn, self.inner_optimizer,
+        #                         copy_initial_weights=False,
+        #                         track_higher_grads=False) as (fpn, diffopt):
+        #     if self.config.learner.evaluation_support_set:
+        #         self.set_train()
+        #         support_prediction_network = fpn
+        #         # Inner loop
+        #         task_predictions, task_labels = [], []
+        #         support_loss = []
+        #         for text, labels in support_set:
+        #             labels = torch.tensor(labels).to(self.device)
+        #             # labels = labels.to(self.device)
+        #             output = self.forward(text, labels, fpn)
+        #             loss = self.loss_fn(output["logits"], labels)
+        #             diffopt.step(loss)
 
-                    pred = model_utils.make_prediction(output["logits"].detach())
-                    support_loss.append(loss.item())
-                    task_predictions.extend(pred.tolist())
-                    task_labels.extend(labels.tolist())
-                results = model_utils.calculate_metrics(task_predictions, task_labels)
-                self.logger.info("Support set metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
-                            "F1 score = {:.4f}".format(np.mean(support_loss), results["accuracy"],
-                            results["precision"], results["recall"], results["f1"]))
-                self.set_eval()
-            else:
-                support_prediction_network = self.pn
-            if prediction_network is None:
-                prediction_network = support_prediction_network
+        #             pred = model_utils.make_prediction(output["logits"].detach())
+        #             support_loss.append(loss.item())
+        #             task_predictions.extend(pred.tolist())
+        #             task_labels.extend(labels.tolist())
+        #         results = model_utils.calculate_metrics(task_predictions, task_labels)
+        #         self.logger.info("Support set metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
+        #                     "F1 score = {:.4f}".format(np.mean(support_loss), results["accuracy"],
+        #                     results["precision"], results["recall"], results["f1"]))
+        #         self.set_eval()
+        #     else:
+        #         support_prediction_network = self.pn
+        #     if prediction_network is None:
+        #         prediction_network = support_prediction_network
 
-            self.set_eval()
-            all_losses, all_predictions, all_labels = [], [], []
-            for i, (text, labels, _) in enumerate(dataloader):
-                labels = torch.tensor(labels).to(self.device)
-                # labels = labels.to(self.device)
-                output = self.forward(text, labels, prediction_network, no_grad=True)
-                loss = self.loss_fn(output["logits"], labels)
-                loss = loss.item()
-                pred = model_utils.make_prediction(output["logits"].detach())
-                all_losses.append(loss)
-                all_predictions.extend(pred.tolist())
-                all_labels.extend(labels.tolist())
-                # if i % 20 == 0:
-                #     self.logger.info(f"Batch {i + 1}/{len(dataloader)} processed")
+        self.set_eval()
+        prototypes = self.memory.class_representations
+        weight = 2 * prototypes
+        bias = - (prototypes ** 2).sum(dim=1)
+        all_losses, all_predictions, all_labels = [], [], []
+        for i, (text, labels, _) in enumerate(dataloader):
+            labels = torch.tensor(labels).to(self.device)
+            representations = self.forward(text, labels)["representation"]
+            logits = representations @ weight.T + bias
+            # labels = labels.to(self.device)
+            loss = self.loss_fn(logits, labels)
+            loss = loss.item()
+            pred = model_utils.make_prediction(logits.detach())
+            all_losses.append(loss)
+            all_predictions.extend(pred.tolist())
+            all_labels.extend(labels.tolist())
 
         results = model_utils.calculate_metrics(all_predictions, all_labels)
         self.logger.debug("Test metrics: Loss = {:.4f}, accuracy = {:.4f}, precision = {:.4f}, recall = {:.4f}, "
@@ -400,30 +397,44 @@ class PrototypicalNetwork(Learner):
                          f"with {len(train_dataset)} samples")
         train_dataloader, eval_dataloader = self.few_shot_preparation(train_dataset, eval_dataset, split=split)
         all_predictions, all_labels = [], []
+        def add_none(iterator):
+            yield None
+            for x in iterator:
+                yield x
+        shifted_dataloader = add_none(train_dataloader)
+        prototypes = self.memory.class_representations
+        for i, (support_set, (query_text, query_labels, datasets)) in enumerate(zip(shifted_dataloader, train_dataloader)):
+            query_labels = torch.tensor(query_labels).to(self.device)
+            # happens on the first one
+            if support_set is None:
+                prototypes = self.memory.class_representations
+            else:
+                support_text, support_labels, _ = support_set
+                support_labels = torch.tensor(support_labels).to(self.device)
+                support_representations = self.forward(support_text, support_labels)["representation"]
+                support_class_means, unique_labels = self.get_class_means(support_representations, support_labels)
+                updated_memory_representations = self.memory.update(support_class_means, unique_labels, logger=self.logger)
+                prototypes = updated_memory_representations
+                if self.config.learner.few_shot_detach_prototypes:
+                    prototypes = prototypes.detach()
+            weight = 2 * prototypes
+            bias = - (prototypes ** 2).sum(dim=1)
+            query_representations = self.forward(query_text, query_labels)["representation"]
+            logits = query_representations @ weight.T + bias
+            loss = self.loss_fn(logits, query_labels)
 
-        self.init_prototypical_classifier(prototypes=self.memory.class_representations)
-        with higher.innerloop_ctx(self.pn, self.inner_optimizer,
-                                copy_initial_weights=False,
-                                track_higher_grads=False) as (fpn, diffopt):
-            # Inner loop
-            for i, (text, labels, datasets) in enumerate(train_dataloader):
-                self.set_train()
-                labels = torch.tensor(labels).to(self.device)
-                output = self.forward(text, labels, fpn)
-                prototype_distances = (output['representation'] - self.memory.class_representations).norm(dim=1)
-                class_distances = list(map(lambda x: (x[0].item(), x[1].item()), list(zip(torch.arange(len(prototype_distances)), prototype_distances))))
-                self.logger.info(f"Ground truth: {labels} -- Prototype distances: {class_distances}")
-                loss = self.loss_fn(output["logits"], labels)
-                diffopt.step(loss)
+            self.meta_optimizer.zero_grad()
+            loss.backward()
+            self.meta_optimizer.step()
 
-                predictions = model_utils.make_prediction(output["logits"].detach())
-                all_predictions.extend(predictions.tolist())
-                all_labels.extend(labels.tolist())
-                dataset_results = self.evaluate(dataloader=eval_dataloader, prediction_network=fpn)
-                self.log_few_shot(all_predictions, all_labels, datasets, dataset_results,
-                                  increment_counters, text, i, split=split)
-                if (i * self.config.testing.few_shot_batch_size) % self.mini_batch_size == 0 and i > 0:
-                    all_predictions, all_labels = [], []
+            predictions = model_utils.make_prediction(logits.detach())
+            all_predictions.extend(predictions.tolist())
+            all_labels.extend(query_labels.tolist())
+            dataset_results = self.evaluate(dataloader=eval_dataloader)
+            self.log_few_shot(all_predictions, all_labels, datasets, dataset_results,
+                                increment_counters, query_text, i, split=split)
+            if (i * self.config.testing.few_shot_batch_size) % self.mini_batch_size == 0 and i > 0:
+                all_predictions, all_labels = [], []
         self.few_shot_end()
 
     def get_class_means(self, embeddings, labels):
