@@ -289,6 +289,35 @@ class Learner:
                         loss = self.loss_fn(output["logits"], labels)
                         loss.backward()
                         self.inner_optimizer.step()
+                elif self.type == "prototypical":
+                    # support_set, _ = self.get_support_set(train_dataloader, n_updates=n_batches)
+                    def add_none(iterator):
+                        yield None
+                        for x in iterator:
+                            yield x
+                    shifted_dataloader = add_none(train_dataloader)
+                    prototypes = self.memory.class_representations
+                    for i, (support_set, (query_text, query_labels, _)) in enumerate(zip(shifted_dataloader, train_dataloader)):
+                        query_labels = torch.tensor(query_labels).to(self.device)
+                        # happens on the first one
+                        if support_set is None:
+                            prototypes = self.memory.class_representations
+                        else:
+                            support_text, support_labels, _ = support_set
+                            support_labels = torch.tensor(support_labels).to(self.device)
+                            support_representations = self.forward(support_text, support_labels)["representation"]
+                            support_class_means, unique_labels = self.get_class_means(support_representations, support_labels)
+                            updated_memory_representations = self.memory.update(support_class_means, unique_labels, logger=self.logger)
+                            prototypes = updated_memory_representations
+                        weight = 2 * prototypes
+                        bias = - (prototypes ** 2).sum(dim=1)
+                        query_representations = self.forward(query_text, query_labels)["representation"]
+                        logits = query_representations @ weight.T + bias
+                        loss = self.loss_fn(logits, query_labels)
+
+                        self.meta_optimizer.zero_grad()
+                        loss.backward()
+                        self.meta_optimizer.step()
                 else:
                     for _ in range(n_batches):
                         text, labels, _ = next(train_dataloader)
@@ -467,12 +496,11 @@ class Learner:
         train_datasets = datasets_dict(datasets["train"], datasets["order"])
         val_datasets = datasets_dict(datasets["test"], datasets["order"])
         eval_dataset = val_datasets[self.config.testing.eval_dataset]
-        if self.config.testing.few_shot:
-            # split into training and testing point, assumes there is no meaningful difference in dataset order
-            eval_train_dataset = eval_dataset.new(0, self.config.testing.n_samples)
-            eval_eval_dataset = eval_dataset.new(self.config.testing.n_samples, -1)
-            # sample a subset so validation doesn't take too long
-            eval_eval_dataset = eval_eval_dataset.sample(min(self.config.testing.few_shot_validation_size, len(eval_dataset)))
+        # split into training and testing point, assumes there is no meaningful difference in dataset order
+        eval_train_dataset = eval_dataset.new(0, self.config.testing.n_samples)
+        eval_eval_dataset = eval_dataset.new(self.config.testing.n_samples, -1)
+        # sample a subset so validation doesn't take too long
+        eval_eval_dataset = eval_eval_dataset.sample(min(self.config.testing.few_shot_validation_size, len(eval_dataset)))
 
         if self.config.data.alternating_order:
             order, n_samples = alternating_order(train_datasets, tasks=self.config.data.alternating_tasks,
@@ -548,7 +576,7 @@ class Learner:
             f"recall = {support_metrics['recall']:.4f}, F1 score = {support_metrics['f1']:.4f}"
         )
         self.logger.debug(
-            f"Episode {self.current_iter + 1} Query set: Loss = {query_loss:.4f}, "
+            f"Episode {self.current_iter + 1} -- Examples seen: {self.examples_seen()} -- Query set: Loss = {query_loss:.4f}, "
             f"accuracy = {query_metrics['accuracy']:.4f}, precision = {query_metrics['precision']:.4f}, "
             f"recall = {query_metrics['recall']:.4f}, F1 score = {query_metrics['f1']:.4f}"
         )
