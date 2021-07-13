@@ -40,10 +40,9 @@ class TransformerClsModel(nn.Module):
         elif out_from == "transformers":
             return cls_representation
         elif out_from == "linear":
-            out = self.linear(inputs)
+            return self.linear(inputs)
         else:
             raise ValueError("Invalid value of argument")
-        return out
 
 
 class TransformerRLN(nn.Module):
@@ -366,6 +365,46 @@ class ClassMemoryStore(MemoryStore):
 
         self.added_memories += n_added
 
+    def update(self, class_means, unique_labels, logger=None):
+        """
+        Update class representations with new class means.
+
+        Parameters
+        ---
+        class_means: Tensor (BATCH, HIDDEN_DIM)
+        unique_labels: Tensor
+            unique classes in batch
+        """
+        n_added = class_means.shape[0]
+        class_discount = self.class_discount
+        to_update = unique_labels
+
+        # selection of old class representations here
+        old_class_representations = self.class_representations[to_update]
+        # if old class representations haven't been given values yet, don't bias towards 0 by exponential update
+        if (old_class_representations == 0).bool().all():
+            new_class_representations = class_means
+        else:
+            n = self.n_class_embeddings[to_update]
+            if self.class_discount_method == "mean":
+                class_discount = (1 / (n + 1)).unsqueeze(-1)
+            # memory update rule here
+            new_class_representations = (1 - class_discount) * old_class_representations + class_discount * class_means
+        self.n_class_embeddings[to_update] += 1
+        if logger is not None:
+            logger.debug(f"Updating class representations for classes {unique_labels}.\n"
+                            f"Distance old class representations and class means: {[round(z, 2) for z in (old_class_representations - class_means).norm(dim=1).tolist()]}\n"
+                            f"Distance old and new class representations: {[round(z, 2) for z in (new_class_representations - old_class_representations).norm(dim=1).tolist()]}"
+                            )
+        # for returning new class representations while keeping gradients intact
+        result = torch.clone(self.class_representations)
+        result[to_update] = new_class_representations
+        # update memory
+        self.class_representations[to_update] = new_class_representations.detach()
+
+        self.added_memories += n_added
+        return result
+
     def update_ixs(self, ixs, embeddings, labels, query_result=None, global_update=True):
         """Update specific memory slots
         
@@ -399,7 +438,7 @@ class ClassMemoryStore(MemoryStore):
         self.memory_relevance = torch.zeros((self.memory_size,), dtype=torch.long).to(self.device)
         if self.n_classes is not None:
             self.class_representations = torch.zeros((self.n_classes, self.key_dim)).to(self.device)
-            self.n_class_embeddings = torch.zeros(self.n_classes)
+            self.n_class_embeddings = torch.zeros(self.n_classes).to(self.device)
 
         self.write_pointer = -1
         self.added_memories = 0
