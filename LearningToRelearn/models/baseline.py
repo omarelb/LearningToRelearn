@@ -35,13 +35,13 @@ class Baseline(Learner):
         self.memory = ReplayMemory(write_prob=self.write_prob, tuple_size=2)
 
     def training(self, datasets, **kwargs):
-        datas, order, n_samples, eval_train_dataset, eval_eval_dataset = self.prepare_data(datasets)
+        datas, order, n_samples, eval_train_dataset, eval_eval_dataset, eval_dataset = self.prepare_data(datasets)
         if self.config.learner.multitask:
             data = ConcatDataset([ClassificationDataset(d.dataset.name, d.dataset.data.iloc[d.indices]) for d in datas])
             train_dataloader = DataLoader(data, batch_size=self.mini_batch_size, shuffle=True)
             self.train(dataloader=train_dataloader, datasets=datasets)
             return
-        for data, dataset_name, n_sample in zip(datas, order, n_samples):
+        for i, (data, dataset_name, n_sample) in enumerate(zip(datas, order, n_samples)):
             self.logger.info(f"Observing dataset {dataset_name} for {n_sample} samples. "
                              f"Evaluation={dataset_name=='evaluation'}")
             if dataset_name == "evaluation":
@@ -50,6 +50,9 @@ class Baseline(Learner):
             else:
                 train_dataloader = DataLoader(data, batch_size=self.mini_batch_size, shuffle=False)
                 self.train(dataloader=train_dataloader, datasets=datasets, dataset_name=dataset_name, max_samples=n_sample)
+            if i == 0:
+                self.metrics["eval_task_first_encounter_evaluation"] = \
+                    self.evaluate(DataLoader(eval_dataset, batch_size=self.mini_batch_size))["accuracy"]
             if dataset_name == self.config.testing.eval_dataset:
                 self.eval_task_first_encounter = False
 

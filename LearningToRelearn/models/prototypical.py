@@ -63,8 +63,8 @@ class PrototypicalNetwork(Learner):
         self.logger.info("Replay frequency: {}".format(replay_freq))
         self.logger.info("Replay steps: {}".format(replay_steps))
 
-        datas, order, n_samples, eval_train_dataset, eval_eval_dataset = self.prepare_data(datasets)
-        for data, dataset_name, n_sample in zip(datas, order, n_samples):
+        datas, order, n_samples, eval_train_dataset, eval_eval_dataset, eval_dataset = self.prepare_data(datasets)
+        for i, (data, dataset_name, n_sample) in enumerate(zip(datas, order, n_samples)):
             self.logger.info(f"Observing dataset {dataset_name} for {n_sample} samples. "
                              f"Evaluation={dataset_name=='evaluation'}")
             if dataset_name == "evaluation" and self.config.testing.few_shot:
@@ -88,6 +88,9 @@ class PrototypicalNetwork(Learner):
                     self.current_iter += 1
                     if self.episode_samples_seen >= n_sample:
                         break
+            if i == 0:
+                self.metrics["eval_task_first_encounter_evaluation"] = \
+                    self.evaluate(DataLoader(eval_dataset, batch_size=self.mini_batch_size))["accuracy"]
             if dataset_name == self.config.testing.eval_dataset:
                 self.eval_task_first_encounter = False
                 
