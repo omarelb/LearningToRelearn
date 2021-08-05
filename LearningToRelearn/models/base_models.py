@@ -1,3 +1,4 @@
+from LearningToRelearn.models.utils import euclidean_dist
 import math
 import random
 from collections import defaultdict, Counter
@@ -378,20 +379,44 @@ class ClassMemoryStore(MemoryStore):
         n_added = class_means.shape[0]
         class_discount = self.class_discount
         to_update = unique_labels
+        normalized_class_means = None
+        normalized_class_representations = None
 
         # selection of old class representations here
         old_class_representations = self.class_representations[to_update]
         # if old class representations haven't been given values yet, don't bias towards 0 by exponential update
-        if (old_class_representations == 0).bool().all():
-            new_class_representations = class_means
-        else:
-            n = self.n_class_embeddings[to_update]
-            if self.class_discount_method == "mean":
-                class_discount = (1 / (n + 1)).unsqueeze(-1)
-            # memory update rule here
-            new_class_representations = (1 - class_discount) * old_class_representations + class_discount * class_means
+        n = self.n_class_embeddings[to_update]
+        if self.class_discount_method == "mean":
+            class_discount = (1 / (n + 1)).unsqueeze(-1)
+        elif self.class_discount_method == "adaptive":
+            class_means_norm = class_means.norm(dim=1).unsqueeze(-1)
+            old_class_representations_norm = old_class_representations.norm(dim=1).unsqueeze(-1)
+            class_means_norm[class_means_norm == 0] = 1 # avoid nans
+            old_class_representations_norm[old_class_representations_norm == 0] = 1 # avoid nans
+            normalized_class_means = class_means / class_means_norm
+            normalized_class_representations = old_class_representations / old_class_representations_norm 
+            
+            # class_dists = euclidean_dist(class_means, old_class_representations).diag()
+            normalized_class_dists = euclidean_dist(normalized_class_means, normalized_class_representations).diag()
+
+            b = 1.3
+            class_discount = (2 / (2 ** b) * normalized_class_dists ** b).unsqueeze(-1)
+            class_discount = torch.clamp_max(class_discount, 1)
+        # memory update rule here
+        # classes of which prototypes haven't been updated yet
+        uninitialized_vector_classes = (old_class_representations == 0).bool().all(dim=1)
+        if uninitialized_vector_classes.all():
+            class_discount = 1
+        elif not isinstance(class_discount, float):
+            # otherwise it is a tensor
+            class_discount[uninitialized_vector_classes] = 1
+        new_class_representations = (1 - class_discount) * old_class_representations + class_discount * class_means
         self.n_class_embeddings[to_update] += 1
         if logger is not None:
+            logger.debug(f"Labels: {unique_labels}")
+            logger.debug(f"Uninitialized Classes: {unique_labels[uninitialized_vector_classes]}")
+            logger.debug(f"Normalized Dists: {normalized_class_dists}")
+            logger.debug(f"Class discount: {class_discount}")
             logger.debug(f"Updating class representations for classes {unique_labels}.\n"
                             f"Distance old class representations and class means: {[round(z, 2) for z in (old_class_representations - class_means).norm(dim=1).tolist()]}\n"
                             f"Distance old and new class representations: {[round(z, 2) for z in (new_class_representations - old_class_representations).norm(dim=1).tolist()]}"
@@ -403,7 +428,7 @@ class ClassMemoryStore(MemoryStore):
         self.class_representations[to_update] = new_class_representations.detach()
 
         self.added_memories += n_added
-        return result
+        return {"new_class_representations": result, "class_discount": class_discount}
 
     def update_ixs(self, ixs, embeddings, labels, query_result=None, global_update=True):
         """Update specific memory slots
