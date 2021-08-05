@@ -1,3 +1,4 @@
+import json
 import logging
 import math
 import time
@@ -20,6 +21,7 @@ from torch.utils.data import DataLoader
 import torch.nn.functional as F
 import torch.optim as opt
 from transformers import AdamW
+from sklearn.manifold import TSNE
 
 import LearningToRelearn.datasets.utils as dataset_utils
 import LearningToRelearn.models.utils as model_utils
@@ -59,6 +61,7 @@ class PrototypicalNetwork(Learner):
         self.episode_samples_seen = 0 # have to keep track of per-task samples seen as we might use replay as well
 
     def training(self, datasets, **kwargs):
+        representations_log = []
         replay_freq, replay_steps = self.replay_parameters()
         self.logger.info("Replay frequency: {}".format(replay_freq))
         self.logger.info("Replay steps: {}".format(replay_steps))
@@ -83,6 +86,36 @@ class PrototypicalNetwork(Learner):
                         break
                     self.training_step(support_set, query_set, task=task)
 
+                    if self.current_iter % 5 == 0:
+                        class_representations = self.memory.class_representations
+                        extra_text, extra_labels, datasets = next(self.extra_dataloader)
+                        with torch.no_grad():
+                            extra_representations = self.forward(extra_text, extra_labels, no_grad=True)["representation"]
+                            query_text, query_labels = query_set[0]
+                            query_representations = self.forward(query_text, query_labels, no_grad=True)["representation"]
+                            extra_dist, extra_dist_normalized, extra_unique_labels = class_dists(extra_representations, extra_labels, class_representations)
+                            query_dist, query_dist_normalized, query_unique_labels = class_dists(query_representations, query_labels, class_representations)
+                            class_representation_distances = model_utils.euclidean_dist(class_representations, class_representations)
+                            representations_log.append(
+                                {
+                                    "query_dist": query_dist.tolist(),
+                                    "query_dist_normalized": query_dist_normalized.tolist(),
+                                    "query_labels": query_labels.tolist(),
+                                    "query_unique_labels": query_unique_labels.tolist(),
+                                    "extra_dist": extra_dist.tolist(),
+                                    "extra_dist_normalized": extra_dist_normalized.tolist(),
+                                    "extra_labels": extra_labels.tolist(),
+                                    "extra_unique_labels": extra_unique_labels.tolist(),
+                                    "class_representation_distances": class_representation_distances.tolist(),
+                                    "class_tsne": TSNE().fit_transform(class_representations).tolist(),
+                                    "current_iter": self.current_iter,
+                                }
+                            )
+                            if self.current_iter % 100 == 0:
+                                with open(self.representations_dir / f"classDists_{self.current_iter}.json", "w") as f:
+                                    json.dump(representations_log, f)
+                                representations_log = []
+
                     self.meta_training_log()
                     self.write_metrics()
                     self.current_iter += 1
@@ -91,6 +124,7 @@ class PrototypicalNetwork(Learner):
             if i == 0:
                 self.metrics["eval_task_first_encounter_evaluation"] = \
                     self.evaluate(DataLoader(eval_dataset, batch_size=self.mini_batch_size))["accuracy"]
+                self.save_checkpoint("first_task_learned.pt", save_optimizer_state=True)
             if dataset_name == self.config.testing.eval_dataset:
                 self.eval_task_first_encounter = False
                 
@@ -107,13 +141,15 @@ class PrototypicalNetwork(Learner):
         self.logger.debug("----------------- SUPPORT SET ----------------- ")
         representations, all_labels = self.get_representations(support_set[:1])
         representations_merged = torch.cat(representations)
-        class_means, unique_labels = self.get_class_means(representations_merged, all_labels)
+        class_means, unique_labels = model_utils.get_class_means(representations_merged, all_labels)
         self._examples_seen += len(representations_merged)
         self.logger.debug(f"Examples seen increased by {len(representations_merged)}")
 
         ### UPDATE MEMORY ###
         if do_memory_update:
-            updated_memory_representations = self.memory.update(class_means, unique_labels, logger=self.logger)
+            memory_update = self.memory.update(class_means, unique_labels, logger=self.logger)
+            updated_memory_representations = memory_update["new_class_representations"]
+            self.log_discounts(memory_update["class_discount"], unique_labels)
         ### DETERMINE WHAT'S SEEN AS PROTOTYPE ###
         if self.config.learner.prototypes == "class_means":
             prototypes = expand_class_representations(self.memory.class_representations, class_means, unique_labels)
@@ -415,8 +451,10 @@ class PrototypicalNetwork(Learner):
                 support_text, support_labels, _ = support_set
                 support_labels = torch.tensor(support_labels).to(self.device)
                 support_representations = self.forward(support_text, support_labels)["representation"]
-                support_class_means, unique_labels = self.get_class_means(support_representations, support_labels)
-                updated_memory_representations = self.memory.update(support_class_means, unique_labels, logger=self.logger)
+                support_class_means, unique_labels = model_utils.get_class_means(support_representations, support_labels)
+                memory_update = self.memory.update(support_class_means, unique_labels, logger=self.logger)
+                updated_memory_representations = memory_update["new_class_representations"]
+                self.log_discounts(memory_update["class_discount"], unique_labels, few_shot_examples_seen=(i+1) * self.mini_batch_size)
                 prototypes = updated_memory_representations
                 if self.config.learner.few_shot_detach_prototypes:
                     prototypes = prototypes.detach()
@@ -440,26 +478,24 @@ class PrototypicalNetwork(Learner):
                 all_predictions, all_labels = [], []
         self.few_shot_end()
 
-    def get_class_means(self, embeddings, labels):
-        """Return class means and unique labels given neighbors.
-        
-        Parameters
-        ---
-        embeddings: Tensor, shape (batch_size, embed_size)
-        labels: iterable of labels for each embedding
-            
-        Returns
-        ---
-        Tuple[List[Tensor], List[Tensor]]:
-            class means and unique labels
-        """
-        class_means = []
-        unique_labels = torch.tensor(labels).unique()
-        for label_ in unique_labels:
-            label_ixs = (label_ == torch.tensor(labels)).nonzero(as_tuple=False).flatten()
-            same_class_embeddings = embeddings[label_ixs]
-            class_means.append(same_class_embeddings.mean(axis=0))
-        return torch.stack(class_means), unique_labels
+    def log_discounts(self, class_discount, unique_labels, few_shot_examples_seen=None):
+        prefix = f"few_shot_{self.few_shot_counter}_" if few_shot_examples_seen is not None else ""
+        discounts = {prefix + "class_discount": {}}
+        if not isinstance(class_discount, float) and not isinstance(class_discount, int):
+            for l, discount in zip(unique_labels, class_discount):
+                discounts[prefix + "class_discount"][f"Class {l}"] = discount.item()
+        else:
+            for l in unique_labels:
+                discounts[prefix + "class_discount"][f"Class {l}"] = float(class_discount)
+        for l in range(self.config.data.n_classes):
+            if l not in unique_labels:
+                discounts[prefix + "class_discount"][f"Class {l}"] = 0
+        discounts["examples_seen"] = few_shot_examples_seen if few_shot_examples_seen is not None else self.examples_seen()
+        if "class_discount" not in self.metrics:
+            self.metrics["class_discount"] = []
+        self.metrics["class_discount"].append(discounts)
+        if self.config.wandb:
+            wandb.log(discounts)
 
 
 def expand_class_representations(class_representations, class_means, unique_labels):
@@ -467,15 +503,13 @@ def expand_class_representations(class_representations, class_means, unique_labe
     expanded[unique_labels] = class_means
     return expanded
 
-def euclidean_dist(x, y):
-    # x: N x D
-    # y: M x D
-    n = x.size(0)
-    m = y.size(0)
-    d = x.size(1)
-    assert d == y.size(1)
-
-    x = x.unsqueeze(1).expand(n, m, d)
-    y = y.unsqueeze(0).expand(n, m, d)
-
-    return torch.pow(x - y, 2).sum(2)
+def class_dists(representations, labels, class_representations):
+    """Return distance between class representations and other representations."""
+    class_means, unique_labels = model_utils.get_class_means(representations, labels)
+    to_update = unique_labels
+    old_class_representations = class_representations[to_update]
+    normalized_class_representations = old_class_representations / old_class_representations.norm(dim=1).unsqueeze(-1)
+    normalized_class_means = class_means / class_means.norm(dim=1).unsqueeze(-1)
+    class_dists = model_utils.euclidean_dist(class_means, old_class_representations)
+    normalized_class_dists = model_utils.euclidean_dist(normalized_class_means, normalized_class_representations)
+    return class_dists, normalized_class_dists, unique_labels

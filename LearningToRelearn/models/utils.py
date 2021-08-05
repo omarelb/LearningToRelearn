@@ -59,3 +59,39 @@ def ewma(series=None, prev_value=None, new_value=None, alpha=0.5):
         return prev_value * (1 - alpha) + new_value * alpha
     else:
         raise ValueError("incompatible parameter configuration")
+
+
+def euclidean_dist(x, y):
+    # x: N x D
+    # y: M x D
+    n = x.size(0)
+    m = y.size(0)
+    d = x.size(1)
+    assert d == y.size(1)
+
+    x = x.unsqueeze(1).expand(n, m, d)
+    y = y.unsqueeze(0).expand(n, m, d)
+
+    return torch.pow(x - y, 2).sum(2)
+
+
+def get_class_means(embeddings, labels):
+    """Return class means and unique labels given neighbors.
+    
+    Parameters
+    ---
+    embeddings: Tensor, shape (batch_size, embed_size)
+    labels: iterable of labels for each embedding
+        
+    Returns
+    ---
+    Tuple[List[Tensor], List[Tensor]]:
+        class means and unique labels
+    """
+    class_means = []
+    unique_labels = torch.tensor(labels).unique()
+    for label_ in unique_labels:
+        label_ixs = (label_ == torch.tensor(labels)).nonzero(as_tuple=False).flatten()
+        same_class_embeddings = embeddings[label_ixs]
+        class_means.append(same_class_embeddings.mean(axis=0))
+    return torch.stack(class_means), unique_labels
