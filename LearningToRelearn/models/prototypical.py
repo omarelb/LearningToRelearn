@@ -107,7 +107,7 @@ class PrototypicalNetwork(Learner):
                                     "extra_labels": extra_labels.tolist(),
                                     "extra_unique_labels": extra_unique_labels.tolist(),
                                     "class_representation_distances": class_representation_distances.tolist(),
-                                    "class_tsne": TSNE().fit_transform(class_representations).tolist(),
+                                    "class_tsne": TSNE().fit_transform(class_representations.cpu()).tolist(),
                                     "current_iter": self.current_iter,
                                 }
                             )
@@ -454,7 +454,8 @@ class PrototypicalNetwork(Learner):
                 support_class_means, unique_labels = model_utils.get_class_means(support_representations, support_labels)
                 memory_update = self.memory.update(support_class_means, unique_labels, logger=self.logger)
                 updated_memory_representations = memory_update["new_class_representations"]
-                self.log_discounts(memory_update["class_discount"], unique_labels, few_shot_examples_seen=(i+1) * self.mini_batch_size)
+                self.log_discounts(memory_update["class_discount"], unique_labels,
+                                    few_shot_examples_seen=(i+1) * self.config.testing.few_shot_batch_size)
                 prototypes = updated_memory_representations
                 if self.config.learner.few_shot_detach_prototypes:
                     prototypes = prototypes.detach()
@@ -494,6 +495,9 @@ class PrototypicalNetwork(Learner):
         if "class_discount" not in self.metrics:
             self.metrics["class_discount"] = []
         self.metrics["class_discount"].append(discounts)
+        if few_shot_examples_seen is not None:
+            self.logger.debug("Logging class discounts")
+            self.logger.debug(f"Examples seen: {discounts['examples_seen']}")
         if self.config.wandb:
             wandb.log(discounts)
 
@@ -513,3 +517,7 @@ def class_dists(representations, labels, class_representations):
     class_dists = model_utils.euclidean_dist(class_means, old_class_representations)
     normalized_class_dists = model_utils.euclidean_dist(normalized_class_means, normalized_class_representations)
     return class_dists, normalized_class_dists, unique_labels
+
+
+def contrastive_loss(class_representations, class_means, unique_labels):
+    return 
