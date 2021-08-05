@@ -32,6 +32,7 @@ from LearningToRelearn.datasets.text_classification_dataset import SAMPLE_SEED, 
 # plt.style.use("seaborn-paper")
 CHECKPOINTS = Path("model-checkpoints/")
 LOGS = Path("tensorboard-logs/")
+REPRESENTATIONS = Path("representations/")
 RESULTS_DIR = Path("results")
 EXPERIMENT_DIR = Path("experiments")
 EXPERIMENT_IDS = Path(hydra.utils.to_absolute_path("experiment_ids.csv"))
@@ -106,6 +107,9 @@ class Learner:
                                 "or different seed. If evaluating, specify the evaluate flag when running the program."
                 )
             self.results_dir.mkdir(parents=True, exist_ok=True)
+
+            self.representations_dir = self.exp_dir / REPRESENTATIONS
+            self.representations_dir.mkdir(parents=True, exist_ok=True)
 
         if config.debug_logging:
             self.logger.setLevel(logging.DEBUG)
@@ -306,9 +310,9 @@ class Learner:
                             support_text, support_labels, _ = support_set
                             support_labels = torch.tensor(support_labels).to(self.device)
                             support_representations = self.forward(support_text, support_labels)["representation"]
-                            support_class_means, unique_labels = self.get_class_means(support_representations, support_labels)
+                            support_class_means, unique_labels = model_utils.get_class_means(support_representations, support_labels)
                             updated_memory_representations = self.memory.update(support_class_means, unique_labels, logger=self.logger)
-                            prototypes = updated_memory_representations
+                            prototypes = updated_memory_representations["new_class_representations"]
                         weight = 2 * prototypes
                         bias = - (prototypes ** 2).sum(dim=1)
                         query_representations = self.forward(query_text, query_labels)["representation"]
@@ -318,6 +322,8 @@ class Learner:
                         self.meta_optimizer.zero_grad()
                         loss.backward()
                         self.meta_optimizer.step()
+                        if i == n_batches - 1:
+                            break
                 else:
                     for _ in range(n_batches):
                         text, labels, _ = next(train_dataloader)
@@ -510,7 +516,9 @@ class Learner:
             n_samples, order = n_samples_order(self.config.learner.samples_per_task, self.config.task_order, datasets["order"])
         datas = get_continuum(train_datasets, order=order, n_samples=n_samples,
                              eval_dataset=self.config.testing.eval_dataset, merge=False)
-        return datas, order, n_samples, eval_train_dataset, eval_eval_dataset
+        # for logging extra things
+        self.extra_dataloader = iter(DataLoader(ConcatDataset(train_datasets.values()), batch_size=self.mini_batch_size, shuffle=True))
+        return datas, order, n_samples, eval_train_dataset, eval_eval_dataset, eval_dataset
 
     def get_support_set(self, data_iterator, max_sample=None, n_updates=None):
         """Return a list of batches of datapoints, and return None if the end of the data is reached.
