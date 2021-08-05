@@ -4,5 +4,5 @@ inner_lr: 0.001 # Inner-loop learning rate
 meta_lr: 0.00001 # Meta learning rate
 replay_rate: 0
 updates: 5
-prototype_update_freq: 5 # how many batches seen before class prototypes are updated
+prototype_update_freq: 1 # how many times 'updates' are done seen before class prototypes are updated
 prototypes: "memory"  # if "memory" use prototypes from memory. Otherwise class means are directly used.

@@ -59,8 +59,13 @@ def learning_slope(performances):
     """
     result = {}
     for i, performance in enumerate(performances[1:]):
-        result[performance["examples_seen"]] = (performance["accuracy"] - performances[0]["accuracy"]) / \
-                                                performance["examples_seen"]
+        try:
+            result[performance["examples_seen"]] = (performance["accuracy"] - performances[0]["accuracy"]) / \
+                                                    performance["examples_seen"]
+        except ZeroDivisionError as e:
+            print(e)
+            result[performance["examples_seen"]] = -1
+
     return result
 
 def expand_dict(d):
@@ -124,6 +129,18 @@ def get_forgetting(few_shot_metrics, metrics):
         forgetting_normalized = None
     return forgetting, forgetting_normalized
 
+def first_encounter_previous_performance(few_shot_metrics, metrics, alpha=1):
+    """
+    Returns the few shot entry where performance exceeds initial performance for the first time.
+    """
+    result = None
+    for accuracy_measurement in few_shot_metrics:
+        if accuracy_measurement["accuracy"] >= alpha * metrics["eval_task_first_encounter_evaluation"]:
+            result = accuracy_measurement
+            break
+    return result
+
+
 def collect_results(metrics):
     """
     Collect results contained in a metrics dictionary.
@@ -179,8 +196,14 @@ def collect_results(metrics):
                     results[split + f"few_shot_relearning_speed_{i}"] = get_relearning(results[f"first_encounter_learning_speed_expanded"],
                                                                             results[split + f"few_shot_learning_speed_{i}"])
                     results[split + f"forgetting_{i}"], results[split + f"forgetting_normalized_{i}"] = get_forgetting(few_shot_metrics, metrics)
-            # validation accuracy after training on k samples, for multiple k
-            # results["few_shot_accuracy"] = metrics["evaluation"]["few_shot"]
+                    if "eval_task_first_encounter_evaluation" in metrics:
+                        for alpha in (0.75, 0.9, 0.95, 1):
+                            entry = first_encounter_previous_performance(few_shot_metrics, metrics, alpha=alpha)
+                            if entry is not None:
+                                results[split + f"regain_previous_performance_samples_{i}_{alpha}"] = entry["examples_seen"]
+                            else:
+                                # dummy value if previous performance was not regained
+                                results[split + f"regain_previous_performance_samples_{i}_{alpha}"] = np.nan
     return results
 
 def analyze_results(metrics_path=None, metrics=None, write_path=None, use_wandb=False, make_plots=True):

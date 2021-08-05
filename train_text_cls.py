@@ -1,3 +1,4 @@
+from LearningToRelearn.models.prototypical import PrototypicalNetwork
 from LearningToRelearn.models.memory_protomaml import MemoryProtomaml
 import logging
 import os
@@ -55,6 +56,8 @@ def get_learner(config, **kwargs):
         learner = ANML(config, **kwargs)
     elif config.learner.type == "memory_protomaml":
         learner = MemoryProtomaml(config, **kwargs)
+    elif config.learner.type == "prototypical":
+        learner = PrototypicalNetwork(config, **kwargs)
     elif config.learner.type == "relearning":
         learner = Relearner(config, **kwargs)
     elif config.learner.type == "basic_memory":
