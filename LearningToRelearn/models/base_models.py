@@ -290,6 +290,9 @@ class ClassMemoryStore(MemoryStore):
         self.device = device
         self.relevance_discount = relevance_discount
         self.delete_method = delete_method
+        # keeps track of which classes where updated when
+        self.last_updated = defaultdict(int)
+        self.last_updated_threshold = 5
 
         self.initialize()
 
@@ -381,6 +384,7 @@ class ClassMemoryStore(MemoryStore):
         to_update = unique_labels
         normalized_class_means = None
         normalized_class_representations = None
+        self.update_last_updated(unique_labels)
 
         # selection of old class representations here
         old_class_representations = self.class_representations[to_update]
@@ -402,6 +406,8 @@ class ClassMemoryStore(MemoryStore):
             b = 1.3
             class_discount = (2 / (2 ** b) * normalized_class_dists ** b).unsqueeze(-1)
             class_discount = torch.clamp_max(class_discount, 1)
+            if logger is not None:
+                logger.debug(f"Normalized Dists: {normalized_class_dists}")
         # memory update rule here
         # classes of which prototypes haven't been updated yet
         uninitialized_vector_classes = (old_class_representations == 0).bool().all(dim=1)
@@ -415,7 +421,6 @@ class ClassMemoryStore(MemoryStore):
         if logger is not None:
             logger.debug(f"Labels: {unique_labels}")
             logger.debug(f"Uninitialized Classes: {unique_labels[uninitialized_vector_classes]}")
-            logger.debug(f"Normalized Dists: {normalized_class_dists}")
             logger.debug(f"Class discount: {class_discount}")
             logger.debug(f"Updating class representations for classes {unique_labels}.\n"
                             f"Distance old class representations and class means: {[round(z, 2) for z in (old_class_representations - class_means).norm(dim=1).tolist()]}\n"
@@ -429,6 +434,19 @@ class ClassMemoryStore(MemoryStore):
 
         self.added_memories += n_added
         return {"new_class_representations": result, "class_discount": class_discount}
+
+    def update_last_updated(self, labels):
+        """
+        Parameters
+        ---
+        labels: iterable of (unique) class labels
+        """
+        for label in list(self.last_updated.keys()):
+            self.last_updated[label] += 1
+            if self.last_updated[label] >= self.last_updated_threshold:
+                del self.last_updated[label]
+        for label in labels:
+            self.last_updated[label] = 0
 
     def update_ixs(self, ixs, embeddings, labels, query_result=None, global_update=True):
         """Update specific memory slots
