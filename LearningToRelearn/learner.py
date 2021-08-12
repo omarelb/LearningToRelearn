@@ -573,9 +573,15 @@ class Learner:
 
     def meta_training_log(self):
         """Logs data during training for meta learners."""
-        support_loss = np.mean(self.tracker["support_loss"])
+        if len(self.tracker["support_loss"]) > 0:
+            support_loss = np.mean(self.tracker["support_loss"])
+        else:
+            support_loss = np.nan
         query_loss = np.mean(self.tracker["query_loss"])
-        support_metrics = model_utils.calculate_metrics(self.tracker["support_predictions"], self.tracker["support_labels"])
+        if len(self.tracker["support_predictions"]) > 0:
+            support_metrics = model_utils.calculate_metrics(self.tracker["support_predictions"], self.tracker["support_labels"])
+        else:
+            support_metrics = collections.defaultdict(lambda: np.nan)
         query_metrics = model_utils.calculate_metrics(self.tracker["query_predictions"], self.tracker["query_labels"])
 
         self.logger.debug(
