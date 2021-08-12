@@ -466,24 +466,7 @@ class PrototypicalNetwork(Learner):
             query_representations = self.forward(query_text, query_labels)["representation"]
             logits = query_representations @ weight.T + bias
 
-            # new part
-            # q_norm = query_representations.norm(dim=1).unsqueeze(-1)
-            # c_norm = prototypes.norm(dim=1).unsqueeze(-1)
-            # c_norm[c_norm == 0] = 1
-            # q_norm[q_norm == 0] = 1
-
-            # query_representations_normalized = query_representations / q_norm
-            # class_representations_normalized = prototypes / c_norm
-            # dists = model_utils.euclidean_dist(query_representations_normalized, class_representations_normalized)
-            # dists = model_utils.euclidean_dist(query_representations, prototypes)
-            # memory loss
-            # memory_loss = dists[torch.arange(len(query_representations)), query_labels].mean()
-
-            # loss = (1 - memory_loss_weight) * self.loss_fn(logits, query_labels) + memory_loss_weight * 
-            # cross_entropy_loss = self.loss_fn(logits, query_labels)
-            # loss = cross_entropy_loss + memory_loss
             loss = self.loss_fn(logits, query_labels)
-            # self.logger.debug(f"Memory loss: {memory_loss} -- Cross Entropy Loss: {cross_entropy_loss}")
 
             self.meta_optimizer.zero_grad()
             loss.backward()
