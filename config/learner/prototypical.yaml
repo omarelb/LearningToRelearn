@@ -5,5 +5,6 @@ meta_lr: 0.00001 # Meta learning rate
 replay_rate: 0
 updates: 1
 prototype_update_freq: 1 # how many times 'updates' are done seen before class prototypes are updated
-prototypes: "memory"  # if "memory" use prototypes from memory. Otherwise class means are directly used.
+prototypes: "memory"  #q if "memory" use prototypes from memory. Otherwise class means are directly used.
 few_shot_detach_prototypes: false  # whether to detach prototypes from gradient graph during few shot evaluation
+class_discount_method: adaptive

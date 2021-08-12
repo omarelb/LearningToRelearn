@@ -13,12 +13,12 @@ learner:
   samples_per_task: # default None, which uses all data of each task
   evaluation_support_set: false # for meta learning methods, whether to use a support set when evaluating
   write_prob: 1.0 # Write probability for buffer memory
-  replay_rate: 0.01 # replay rate from memory
+  replay_rate: 0 # replay rate from memory
   replay_every: 9600 # Number of data points between replay
   updates: 5 # number of inner loop updates
   clip_grad_norm: 25 # gradient norm clipping (for replay learner)
-  class_discount: 0.01 # exponential decay factor class representation
-  class_discount_method: "exponential" # "mean" or "exponential"
+  class_discount: 0.1 # exponential decay factor class representation
+  class_discount_method: "exponential" # "mean" or "exponential" or "adaptive"
 
 data:
   alternating_order: false # whether to use an alternating order in the data
