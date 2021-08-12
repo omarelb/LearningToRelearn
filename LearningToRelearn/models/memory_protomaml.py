@@ -3,6 +3,7 @@ import math
 import time
 import pprint
 from contextlib import nullcontext
+import json
 
 import higher
 import torch
@@ -19,6 +20,7 @@ from torch.utils.data import DataLoader
 import torch.nn.functional as F
 import torch.optim as opt
 from transformers import AdamW
+from sklearn.manifold import TSNE
 
 import LearningToRelearn.datasets.utils as dataset_utils
 import LearningToRelearn.models.utils as model_utils
@@ -68,6 +70,7 @@ class MemoryProtomaml(Learner):
         self.episode_samples_seen = 0 # have to keep track of per-task samples seen as we might use replay as well
 
     def training(self, datasets, **kwargs):
+        representations_log = []
         replay_freq, replay_steps = self.replay_parameters()
         self.logger.info("Replay frequency: {}".format(replay_freq))
         self.logger.info("Replay steps: {}".format(replay_steps))
@@ -91,6 +94,37 @@ class MemoryProtomaml(Learner):
                     if support_set is None or query_set is None:
                         break
                     self.training_step(support_set, query_set, task=task)
+
+                    if self.current_iter % 5 == 0:
+                        class_representations = self.memory.class_representations
+                        extra_text, extra_labels, datasets = next(self.extra_dataloader)
+                        with torch.no_grad():
+                            extra_representations = self.forward(extra_text, extra_labels, no_grad=True)["representation"]
+                            query_text, query_labels = query_set[0]
+                            query_representations = self.forward(query_text, query_labels, no_grad=True)["representation"]
+                            extra_dist, extra_dist_normalized, extra_unique_labels = model_utils.class_dists(extra_representations, extra_labels, class_representations)
+                            query_dist, query_dist_normalized, query_unique_labels = model_utils.class_dists(query_representations, query_labels, class_representations)
+                            class_representation_distances = model_utils.euclidean_dist(class_representations, class_representations)
+                            representations_log.append(
+                                {
+                                    "query_dist": query_dist.tolist(),
+                                    "query_dist_normalized": query_dist_normalized.tolist(),
+                                    "query_labels": query_labels.tolist(),
+                                    "query_unique_labels": query_unique_labels.tolist(),
+                                    "extra_dist": extra_dist.tolist(),
+                                    "extra_dist_normalized": extra_dist_normalized.tolist(),
+                                    "extra_labels": extra_labels.tolist(),
+                                    "extra_unique_labels": extra_unique_labels.tolist(),
+                                    "class_representation_distances": class_representation_distances.tolist(),
+                                    "class_tsne": TSNE().fit_transform(class_representations.cpu()).tolist(),
+                                    "current_iter": self.current_iter,
+                                    "examples_seen": self.examples_seen()
+                                }
+                                )
+                            if self.current_iter % 100 == 0:
+                                with open(self.representations_dir / f"classDists_{self.current_iter}.json", "w") as f:
+                                    json.dump(representations_log, f)
+                                representations_log = []
 
                     self.meta_training_log()
                     self.write_metrics()
