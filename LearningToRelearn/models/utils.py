@@ -95,3 +95,14 @@ def get_class_means(embeddings, labels):
         same_class_embeddings = embeddings[label_ixs]
         class_means.append(same_class_embeddings.mean(axis=0))
     return torch.stack(class_means), unique_labels
+
+def class_dists(representations, labels, class_representations):
+    """Return distance between class representations and other representations."""
+    class_means, unique_labels = get_class_means(representations, labels)
+    to_update = unique_labels
+    old_class_representations = class_representations[to_update]
+    normalized_class_representations = old_class_representations / old_class_representations.norm(dim=1).unsqueeze(-1)
+    normalized_class_means = class_means / class_means.norm(dim=1).unsqueeze(-1)
+    class_dists = euclidean_dist(class_means, old_class_representations)
+    normalized_class_dists = euclidean_dist(normalized_class_means, normalized_class_representations)
+    return class_dists, normalized_class_dists, unique_labels

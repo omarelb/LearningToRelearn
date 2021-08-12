@@ -93,8 +93,8 @@ class PrototypicalNetwork(Learner):
                             extra_representations = self.forward(extra_text, extra_labels, no_grad=True)["representation"]
                             query_text, query_labels = query_set[0]
                             query_representations = self.forward(query_text, query_labels, no_grad=True)["representation"]
-                            extra_dist, extra_dist_normalized, extra_unique_labels = model_utils.class_dists(extra_representations, extra_labels, class_representations)
-                            query_dist, query_dist_normalized, query_unique_labels = model_utils.class_dists(query_representations, query_labels, class_representations)
+                            extra_dist, extra_dist_normalized, extra_unique_labels = class_dists(extra_representations, extra_labels, class_representations)
+                            query_dist, query_dist_normalized, query_unique_labels = class_dists(query_representations, query_labels, class_representations)
                             class_representation_distances = model_utils.euclidean_dist(class_representations, class_representations)
                             representations_log.append(
                                 {
@@ -109,7 +109,6 @@ class PrototypicalNetwork(Learner):
                                     "class_representation_distances": class_representation_distances.tolist(),
                                     "class_tsne": TSNE().fit_transform(class_representations.cpu()).tolist(),
                                     "current_iter": self.current_iter,
-                                    "examples_seen": self.examples_seen()
                                 }
                                 )
                             if self.current_iter % 100 == 0:
@@ -125,7 +124,7 @@ class PrototypicalNetwork(Learner):
             if i == 0:
                 self.metrics["eval_task_first_encounter_evaluation"] = \
                     self.evaluate(DataLoader(eval_dataset, batch_size=self.mini_batch_size))["accuracy"]
-                # self.save_checkpoint("first_task_learned.pt", save_optimizer_state=True)
+                self.save_checkpoint("first_task_learned.pt", save_optimizer_state=True)
             if dataset_name == self.config.testing.eval_dataset:
                 self.eval_task_first_encounter = False
                 
@@ -442,11 +441,10 @@ class PrototypicalNetwork(Learner):
             for x in iterator:
                 yield x
         shifted_dataloader = add_none(train_dataloader)
-        # prototypes = self.memory.class_representations
+        prototypes = self.memory.class_representations
         for i, (support_set, (query_text, query_labels, datasets)) in enumerate(zip(shifted_dataloader, train_dataloader)):
             query_labels = torch.tensor(query_labels).to(self.device)
             # happens on the first one
-            # prototypes = self.memory.class_representations
             if support_set is None:
                 prototypes = self.memory.class_representations
             else:
@@ -466,24 +464,12 @@ class PrototypicalNetwork(Learner):
             query_representations = self.forward(query_text, query_labels)["representation"]
             logits = query_representations @ weight.T + bias
 
-            # new part
-            # q_norm = query_representations.norm(dim=1).unsqueeze(-1)
-            # c_norm = prototypes.norm(dim=1).unsqueeze(-1)
-            # c_norm[c_norm == 0] = 1
-            # q_norm[q_norm == 0] = 1
+            query_representations_normalized = query_representations / query_representations.norm(dim=1).unsqueeze(-1)
+            class_representations_normalized = class_representations / class_representations.norm(dim=1).unsqueeze(-1)
+            dists = model_utils.euclidean_dist(query_representations_normalized, class_representations_normalized)
 
-            # query_representations_normalized = query_representations / q_norm
-            # class_representations_normalized = prototypes / c_norm
-            # dists = model_utils.euclidean_dist(query_representations_normalized, class_representations_normalized)
-            # dists = model_utils.euclidean_dist(query_representations, prototypes)
-            # memory loss
-            # memory_loss = dists[torch.arange(len(query_representations)), query_labels].mean()
-
-            # loss = (1 - memory_loss_weight) * self.loss_fn(logits, query_labels) + memory_loss_weight * 
-            # cross_entropy_loss = self.loss_fn(logits, query_labels)
-            # loss = cross_entropy_loss + memory_loss
+            class_distance = dists[torch.arange(len(q_normalized)), labels].mean()
             loss = self.loss_fn(logits, query_labels)
-            # self.logger.debug(f"Memory loss: {memory_loss} -- Cross Entropy Loss: {cross_entropy_loss}")
 
             self.meta_optimizer.zero_grad()
             loss.backward()
@@ -526,6 +512,17 @@ def expand_class_representations(class_representations, class_means, unique_labe
     expanded = torch.zeros_like(class_representations)
     expanded[unique_labels] = class_means
     return expanded
+
+def class_dists(representations, labels, class_representations):
+    """Return distance between class representations and other representations."""
+    class_means, unique_labels = model_utils.get_class_means(representations, labels)
+    to_update = unique_labels
+    old_class_representations = class_representations[to_update]
+    normalized_class_representations = old_class_representations / old_class_representations.norm(dim=1).unsqueeze(-1)
+    normalized_class_means = class_means / class_means.norm(dim=1).unsqueeze(-1)
+    class_dists = model_utils.euclidean_dist(class_means, old_class_representations)
+    normalized_class_dists = model_utils.euclidean_dist(normalized_class_means, normalized_class_representations)
+    return class_dists, normalized_class_dists, unique_labels
 
 
 def contrastive_loss(class_representations, class_means, unique_labels):
